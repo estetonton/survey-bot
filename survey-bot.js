@@ -5,15 +5,9 @@ const fs = require('fs');
 
 puppeteer.use(StealthPlugin());
 
-const CHROME_PATH = 'C:\\Users\\Alan Garzon\\.cache\\puppeteer\\chrome\\win64-150.0.7871.24\\chrome-win64\\chrome.exe';
-const PROFILE_DIR = path.join(__dirname, 'profile');
-// Clean up stale Chrome lock files from previous runs
-try {
-  ['SingletonLock', 'SingletonSocket', 'SingletonCookie'].forEach(f => {
-    const p = path.join(PROFILE_DIR, f);
-    if (fs.existsSync(p)) fs.unlinkSync(p);
-  });
-} catch (e) {}
+const CHROME_PATH = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+const PROFILE_DIR = 'C:\\Users\\Alan Garzon\\AppData\\Local\\Google\\Chrome\\User Data';
+const PROFILE_NAME = 'Default';
 const LOG_FILE = path.join(__dirname, 'bot.log');
 const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
 const CAPTCHA_FLAG = path.join(__dirname, 'captcha.txt');
@@ -579,6 +573,10 @@ async function main() {
   log('=== Survey Bot v5 (Universal Engine) ===');
   log(`Session: ${sessionState.completed} done / ${sessionState.disqualified} dq`);
 
+  log('Closing existing Chrome to unlock profile...');
+  try { require('child_process').execSync('taskkill /F /IM chrome.exe /T', { stdio: 'ignore' }); } catch(e) {}
+  await sleep(3000);
+
   browser = await puppeteer.launch({
     headless: false, executablePath: CHROME_PATH,
     defaultViewport: { width: 1280, height: 900 },
@@ -589,6 +587,7 @@ async function main() {
       '--window-size=1280,900',
       '--disable-features=ChromeWhatsNewUI',
       '--no-default-browser-check',
+      `--profile-directory=${PROFILE_NAME}`,
     ],
   });
 
@@ -601,46 +600,63 @@ async function main() {
   await page.goto('https://freecash.com/en', { waitUntil: 'domcontentloaded', timeout: 30000 });
   await sleep(3000);
 
+  // Popup handler: just log during login, don't close (might be email sign-in)
+  page.on('popup', async (popup) => {
+    try {
+      const u = popup.url().slice(0, 100);
+      log(`Popup opened during login: ${u}`);
+      // Don't close it - user might be signing in via email
+    } catch (e) { /* ignore */ }
+  });
+
   // ===== LOGIN GATE =====
-  // Bot does ABSOLUTELY NOTHING until user logs in manually
-  // NO popup handler is registered yet - ALL popups pass through untouched
   await page.evaluate(() => { document.title = '🔴 SURVEY BOT - LOG IN FIRST 🔴'; });
   log('===========================================');
   log('  SURVEY BOT - LOG IN MANUALLY');
   log('  Browser is open. Sign in to Freecash.');
-  log('  Use Google, Facebook, or email.');
+  log('  Use EMAIL (NOT Google - Google breaks the bot)');
   log('  The bot does NOTHING until you log in.');
   log('===========================================\n');
 
   let loggedIn = false;
-  log('Checking for login (looks for user avatar/name, NOT just "Cashout" text)...');
+  log('Checking for login...');
   for (let i = 0; i < 120; i++) {
     const check = await page.evaluate(() => {
-      const body = document.body.innerText;
-      const hasSignIn = body.includes('Sign In') || body.includes('Sign in');
-      const hasSignUp = body.includes('Sign Up') || body.includes('Sign up');
-      const hasCashout = body.includes('Cashout');
+      const body = (document.body?.innerText || '');
+      const hasSignIn = /sign\s*in/i.test(body);
+      const hasSignUp = /sign\s*up/i.test(body);
+      const hasCashout = /cashout/i.test(body);
       const hasAvatar = !!document.querySelector('[class*="avatar"], [class*="Avatar"], [class*="user-menu"], [class*="UserMenu"], [data-testid*="user"], [class*="profile"]');
-      // Logged in = Cashout visible AND no Sign In/Sign Up buttons
       const noSignButtons = !hasSignIn && !hasSignUp;
       return { hasCashout, hasSignIn, hasSignUp, hasAvatar, noSignButtons, loggedIn: (hasCashout && noSignButtons) || hasAvatar };
     }).catch(() => ({ loggedIn: false }));
 
     if (check.loggedIn) { loggedIn = true; break; }
-    if (i % 6 === 0) log(`Waiting for login... (${Math.round(i * 5 / 60)}min) - sign buttons: ${check.hasSignIn ? 'yes' : 'no'}, cashout: ${check.hasCashout ? 'yes' : 'no'}`);
+
+    // If we navigated away from freecash (e.g. auth redirect), go back
+    const curUrl = page.url().toLowerCase();
+    if (!curUrl.includes('freecash')) {
+      log(`Navigated away to ${curUrl.slice(0, 80)} - going back to Freecash`);
+      try { await page.goto('https://freecash.com/en', { waitUntil: 'domcontentloaded', timeout: 15000 }); } catch(e) {}
+      await sleep(3000);
+    }
+
+    if (i % 6 === 0) log(`Waiting for login... (${Math.round(i * 5 / 60)}min) - sign: ${check.hasSignIn ? 'yes' : 'no'}, cashout: ${check.hasCashout ? 'yes' : 'no'}`);
     await sleep(5000);
   }
 
   if (!loggedIn) {
     log('Login timeout (10min). Restart.');
-    await browser.close(); process.exit(1);
+    try { await browser.close(); } catch(e) {}
+    process.exit(1);
   }
 
-  // ===== LOGIN DONE - NOW register popup handler =====
+  // ===== LOGIN DONE - navigate to main page & start =====
+  page.removeAllListeners('popup');
   page.on('popup', async (popup) => {
     try {
       await runSurvey(popup, currentProfile || { ...ID.fixed, ...ID.variable });
-      await page.bringToFront();
+      try { await page.bringToFront(); } catch(e) {}
     } catch (e) { log(`Popup error: ${e.message}`); }
   });
 
@@ -654,7 +670,7 @@ async function main() {
     try {
       await page.goto('https://freecash.com/en', { waitUntil: 'domcontentloaded', timeout: 20000 });
       await sleep(5000);
-      for (let s = 0; s < 6; s++) { await page.evaluate(() => window.scrollBy(0, 400)); await sleep(600 + Math.random() * 400); }
+      for (let s = 0; s < 6; s++) { try { await page.evaluate(() => window.scrollBy(0, 400)); } catch(e) {} await sleep(600 + Math.random() * 400); }
 
       const offers = await findOffers(page);
       const targets = offers.filter(o => o.isSurvey || o.money > 0);
@@ -678,12 +694,14 @@ async function main() {
         if (clicked) await sleep(8000 + Math.random() * 4000);
       } else {
         fails++;
-        if (fails >= 5) { await page.reload(); await sleep(5000); fails = 0; }
+        if (fails >= 5) { try { await page.reload(); } catch(e) {} await sleep(5000); fails = 0; }
       }
     } catch (e) { log(`Error: ${e.message.slice(0, 120)}`); fails++; }
     await sleep(20000 + Math.random() * 10000);
   }
 }
 
-process.on('SIGINT', async () => { log('Shutdown'); saveState(); if (browser) await browser.close(); process.exit(0); });
-main().catch(async e => { log(`Fatal: ${e.message}`); saveState(); if (browser) await browser.close(); process.exit(1); });
+process.on('SIGINT', async () => { log('Shutdown'); saveState(); try { if (browser) await browser.close(); } catch(e) {} process.exit(0); });
+process.on('unhandledRejection', (err) => { log(`Unhandled Rejection: ${err?.message || err}`); });
+process.on('uncaughtException', (err) => { log(`Uncaught Exception: ${err?.message || err}`); });
+main().catch(async e => { log(`Fatal: ${e.message}`); saveState(); try { if (browser) await browser.close(); } catch(e2) {} process.exit(1); });
