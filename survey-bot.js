@@ -21,51 +21,75 @@ let sessionState = { surveyCount: 0, completed: 0, disqualified: 0, startTime: D
 try { if (fs.existsSync(STATE_FILE)) sessionState = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); } catch (e) {}
 const saveState = () => fs.writeFileSync(STATE_FILE, JSON.stringify(sessionState, null, 2));
 
-// ── GOLDEN PROFILE ──────────────────────────────────────────────────────────────
-const GOLDEN = {
-  age: '25-34',
-  gender: 'Female',
-  income: '$50,000 - $74,999',
-  education: "Bachelor's degree",
-  employment: 'Employed full-time',
-  occupation: 'Marketing Manager',
-  industry: 'Technology',
-  company: 'Mid-size company (50-999 employees)',
-  household: '3',
-  children: 'Yes',
-  childrenAges: '6-12',
-  marital: 'Married',
-  homeowner: 'Own',
-  residence: 'Suburbs',
-  region: 'United States',
-  state: 'California',
-  city: 'San Diego',
-  zip: '92101',
-  ethnicity: 'White / Caucasian',
-  health: 'Good',
-  exercise: 'Several times a week',
-  diet: 'Omnivore',
-  smoker: 'No',
-  alcohol: 'Socially',
-  shopping: 'Amazon',
-  shoppingFreq: 'Weekly',
-  streaming: 'Netflix',
-  streamingHours: '1-3 hours',
-  socialMedia: ['Facebook', 'Instagram', 'YouTube'],
-  browser: 'Desktop/Laptop',
-  mobile: 'iPhone',
-  carrier: 'Verizon',
-  pet: 'Dog',
-  travel: '1-2 times per year',
-  car: 'Toyota',
-  carAge: '3-5 years',
-  insurance: ['Health', 'Auto', 'Home'],
-  banking: ['Checking', 'Savings', 'Credit Card'],
-  invest: 'Yes',
-  crypto: 'No',
-  dining: '2-3 times per week',
-  cooking: 'Several times a week',
-  hobbies: ['Reading', 'Cooking', 'Hiking', 'Photography'],
+// ── IDENTITY SYSTEM ─────────────────────────────────────────────────────────────
+// FIXED = core demographics, NEVER change per survey (same person always)
+// VARIABLE = opinions/preferences, can vary per survey but consistent within it
+const IDENTITY = {
+  fixed: {
+    age: '25-34',
+    gender: 'Female',
+    income: '$50,000 - $74,999',
+    education: "Bachelor's degree",
+    employment: 'Employed full-time',
+    occupation: 'Marketing Manager',
+    industry: 'Technology',
+    company: 'Mid-size company (50-999 employees)',
+    household: '3',
+    children: 'Yes',
+    childrenAges: '6-12',
+    marital: 'Married',
+    homeowner: 'Own',
+    residence: 'Suburbs',
+    region: 'United States',
+    state: 'California',
+    city: 'San Diego',
+    zip: '92101',
+    ethnicity: 'White / Caucasian',
+    browser: 'Desktop/Laptop',
+    mobile: 'iPhone',
+    carrier: 'Verizon',
+    smoker: 'No',
+  },
+  variable: {
+    health: 'Good',
+    exercise: 'Several times a week',
+    diet: 'Omnivore',
+    alcohol: 'Socially',
+    shopping: 'Amazon',
+    shoppingFreq: 'Weekly',
+    streaming: 'Netflix',
+    streamingHours: '1-3 hours',
+    socialMedia: ['Facebook', 'Instagram', 'YouTube'],
+    pet: 'Dog',
+    travel: '1-2 times per year',
+    car: 'Toyota',
+    carAge: '3-5 years',
+    insurance: ['Health', 'Auto', 'Home'],
+    banking: ['Checking', 'Savings', 'Credit Card'],
+    invest: 'Yes',
+    crypto: 'No',
+    dining: '2-3 times per week',
+    cooking: 'Several times a week',
+    hobbies: ['Reading', 'Cooking', 'Hiking', 'Photography'],
+  },
+};
+
+// Topic adaptations ONLY touch variable fields (opinions), never fixed (demographics)
+const TOPIC_ADAPT = {
+  // Only variable/opinion fields here. Fixed demographics are locked in IDENTITY.fixed
+  automotive: { car: 'Toyota Camry', carAge: '3-5 years', insurance: ['Health', 'Auto', 'Home'], hobbies: ['Driving', 'Hiking', 'Photography'] },
+  health: { health: 'Good', exercise: 'Several times a week', diet: 'Omnivore', alcohol: 'Socially', hobbies: ['Yoga', 'Hiking', 'Reading'] },
+  technology: { streaming: 'Netflix', streamingHours: '3-5 hours', hobbies: ['Gaming', 'Photography', 'Reading'] },
+  gaming: { streamingHours: '3-5 hours', hobbies: ['Gaming', 'Streaming', 'Technology'] },
+  finance: { banking: ['Checking', 'Savings', 'Credit Card', 'Investment'], invest: 'Yes', crypto: 'No' },
+  travel: { travel: '3-4 times per year', hobbies: ['Travel', 'Photography', 'Hiking'], dining: '3-4 times per week' },
+  shopping: { shoppingFreq: 'Weekly', dining: '3-4 times per week', hobbies: ['Shopping', 'Fashion', 'Cooking'] },
+  food: { cooking: 'Daily', dining: '3-4 times per week', diet: 'Omnivore', hobbies: ['Cooking', 'Baking', 'Reading'] },
+  entertainment: { streamingHours: '3-5 hours', hobbies: ['Streaming', 'Reading', 'Movies'] },
+  parenting: { childrenAges: '6-12', hobbies: ['Cooking', 'Photography', 'Reading'] },
+  pet: { pet: 'Dog', hobbies: ['Hiking', 'Photography', 'Walking'] },
+  home: { hobbies: ['Gardening', 'Cooking', 'DIY'] },
+  fitness: { exercise: 'Daily', health: 'Excellent', diet: 'Omnivore', hobbies: ['Running', 'Yoga', 'Hiking'] },
 };
 
 // ── OFFERWALL DETECTION ──────────────────────────────────────────────────────────
@@ -91,22 +115,26 @@ function detectOfferwall(url) {
 }
 
 // ── SURVEY TOPIC ANALYSIS ─────────────────────────────────────────────────────────
-const TOPICS = {
-  automotive: { keywords: ['car', 'auto', 'vehicle', 'driving', 'truck', 'toyota', 'honda', 'ford', 'tesla', 'gas', 'insurance auto'], profile: { car: 'Toyota Camry', carAge: '3-5 years', insurance: ['Health','Auto','Home'] } },
-  health: { keywords: ['health', 'medical', 'insurance health', 'doctor', 'hospital', 'pharma', 'drug', 'vitamin', 'wellness', 'condition', 'disease', 'symptom', 'covid'], profile: { health: 'Good', exercise: 'Several times a week', smoker: 'No', alcohol: 'Socially', diet: 'Omnivore' } },
-  technology: { keywords: ['tech', 'software', 'app', 'computer', 'laptop', 'smartphone', 'gadget', 'device', 'internet', 'wifi', 'streaming', 'gaming console'], profile: { browser: 'Desktop/Laptop', mobile: 'iPhone 15', hobbies: ['Reading','Cooking','Hiking','Photography','Gaming'] } },
-  gaming: { keywords: ['gaming', 'video game', 'console', 'xbox', 'playstation', 'nintendo', 'pc game', 'mobile game', 'esport', 'roblox', 'fortnite', 'minecraft'], profile: { hobbies: ['Gaming','Reading','Streaming'], streamingHours: '3-5 hours', browser: 'Desktop/Laptop' } },
-  finance: { keywords: ['finance', 'bank', 'credit card', 'mortgage', 'loan', 'invest', 'saving', 'retirement', 'crypto', 'stock', 'insurance life'], profile: { banking: ['Checking','Savings','Credit Card','Investment'], invest: 'Yes', income: '$75,000 - $99,999' } },
-  travel: { keywords: ['travel', 'vacation', 'hotel', 'flight', 'airline', 'cruise', 'trip', 'tourist', 'destination', 'travel insurance'], profile: { travel: '3-4 times per year', hobbies: ['Travel','Photography','Hiking'] } },
-  shopping: { keywords: ['shop', 'retail', 'store', 'online shop', 'amazon', 'walmart', 'target', 'fashion', 'clothing', 'beauty', 'cosmetic', 'brand'], profile: { shoppingFreq: 'Weekly', shopping: 'Amazon', dining: '3-4 times per week' } },
-  food: { keywords: ['food', 'restaurant', 'cooking', 'grocery', 'snack', 'beverage', 'drink', 'diet', 'nutrition', 'meal', 'recipe'], profile: { cooking: 'Daily', dining: '3-4 times per week', diet: 'Omnivore', hobbies: ['Cooking','Reading'] } },
-  entertainment: { keywords: ['movie', 'tv', 'show', 'netflix', 'hulu', 'disney', 'stream', 'music', 'concert', 'ticket', 'entertainment'], profile: { streamingHours: '3-5 hours', streaming: 'Netflix', hobbies: ['Streaming','Reading'] } },
-  parenting: { keywords: ['parent', 'child', 'kid', 'family', 'baby', 'toddler', 'school', 'education child', 'toy'], profile: { children: 'Yes', childrenAges: '6-12', marital: 'Married', household: '3', hobbies: ['Reading','Cooking','Photography'] } },
-  education: { keywords: ['education', 'college', 'university', 'school', 'student', 'learning', 'course', 'degree', 'online learning'], profile: { education: "Master's degree", occupation: 'Marketing Manager', industry: 'Technology' } },
-  pet: { keywords: ['pet', 'dog', 'cat', 'veterinary', 'pet food', 'animal'], profile: { pet: 'Dog', hobbies: ['Hiking','Photography'] } },
-  home: { keywords: ['home', 'house', 'garden', 'renovation', 'furniture', 'decor', 'appliance', 'cleaning', 'home improvement'], profile: { homeowner: 'Own', residence: 'Suburbs', hobbies: ['Cooking','Gardening'] } },
-  fitness: { keywords: ['fitness', 'gym', 'exercise', 'workout', 'sport', 'athletic', 'running', 'yoga', 'supplement'], profile: { exercise: 'Daily', health: 'Excellent', hobbies: ['Hiking','Running','Yoga'] } },
-};
+const TOPICS = {};
+for (const [topic, adapt] of Object.entries(TOPIC_ADAPT)) {
+  const keywordMap = {
+    automotive: ['car', 'auto', 'vehicle', 'driving', 'truck', 'toyota', 'honda', 'ford', 'tesla', 'gas'],
+    health: ['health', 'medical', 'doctor', 'hospital', 'pharma', 'drug', 'vitamin', 'wellness', 'condition', 'disease', 'symptom', 'covid'],
+    technology: ['tech', 'software', 'app', 'computer', 'laptop', 'smartphone', 'gadget', 'device', 'internet', 'wifi'],
+    gaming: ['gaming', 'video game', 'console', 'xbox', 'playstation', 'nintendo', 'pc game', 'mobile game', 'esport', 'roblox', 'fortnite', 'minecraft'],
+    finance: ['finance', 'bank', 'credit card', 'mortgage', 'loan', 'invest', 'saving', 'retirement', 'stock', 'insurance life'],
+    travel: ['travel', 'vacation', 'hotel', 'flight', 'airline', 'cruise', 'trip', 'tourist', 'destination'],
+    shopping: ['shop', 'retail', 'store', 'online shop', 'amazon', 'walmart', 'target', 'fashion', 'clothing', 'beauty', 'cosmetic', 'brand'],
+    food: ['food', 'restaurant', 'cooking', 'grocery', 'snack', 'beverage', 'drink', 'diet', 'nutrition', 'meal', 'recipe'],
+    entertainment: ['movie', 'tv', 'show', 'netflix', 'hulu', 'disney', 'stream', 'music', 'concert', 'ticket'],
+    parenting: ['parent', 'child', 'kid', 'family', 'baby', 'toddler', 'school', 'toy'],
+    education: ['education', 'college', 'university', 'school', 'student', 'learning', 'course', 'degree', 'online learning'],
+    pet: ['pet', 'dog', 'cat', 'veterinary', 'pet food', 'animal'],
+    home: ['home', 'house', 'garden', 'renovation', 'furniture', 'decor', 'appliance', 'cleaning', 'home improvement'],
+    fitness: ['fitness', 'gym', 'exercise', 'workout', 'sport', 'athletic', 'running', 'yoga', 'supplement'],
+  };
+  TOPICS[topic] = { keywords: keywordMap[topic] || [], adaptation: adapt };
+}
 
 function analyzeOffer(text) {
   const t = text.toLowerCase();
@@ -127,11 +155,22 @@ function analyzeOffer(text) {
 
 function getProfileForSurvey(offerText) {
   const analysis = analyzeOffer(offerText);
-  const profile = { ...GOLDEN };
-  if (analysis.primaryTopic && TOPICS[analysis.primaryTopic]) {
-    Object.assign(profile, TOPICS[analysis.primaryTopic].profile);
+  const profile = {};
+  // Order matters: fixed -> variable -> topic adapt -> fixed (to lock immutable fields)
+  Object.assign(profile, IDENTITY.fixed);
+  Object.assign(profile, IDENTITY.variable);
+  if (analysis.primaryTopic && TOPIC_ADAPT[analysis.primaryTopic]) {
+    Object.assign(profile, TOPIC_ADAPT[analysis.primaryTopic]);
   }
+  // Fixed demographics OVERRIDE everything - they NEVER change
+  Object.assign(profile, IDENTITY.fixed);
+  log(`Profile: ${IDENTITY.fixed.gender}, ${IDENTITY.fixed.age} | adapted for ${analysis.primaryTopic || 'general'}`);
   return profile;
+}
+
+function markVar(key) {
+  // Returns true if a key is a variable/opinion field (safe to change per survey)
+  return key in IDENTITY.variable || Object.values(TOPIC_ADAPT).some(a => key in a);
 }
 
 // ── ANSWER GENERATION ─────────────────────────────────────────────────────────
@@ -360,7 +399,7 @@ async function answerPage(framePage) {
           }
         }
         return c;
-      }, JSON.stringify(currentSurveyProfile || GOLDEN));
+      }, JSON.stringify(currentSurveyProfile || { ...IDENTITY.fixed, ...IDENTITY.variable }));
       if (answered > 0) interacted = true;
     } catch (e) {}
   }
@@ -456,7 +495,10 @@ async function main() {
     for (let i = 0; i < 60; i++) { await sleep(5000); if (await page.evaluate(() => document.body.innerText.includes('Cashout'))) { log('Logged in'); break; } }
   }
 
-  log('\nProfile loaded: Female, 25-34, $50-74k, Bachelor, Full-time, Married, 1 child, Homeowner\n');
+  log(`\nIdentity: ${IDENTITY.fixed.gender}, ${IDENTITY.fixed.age}, ${IDENTITY.fixed.income}, ${IDENTITY.fixed.education}`);
+  log(`          ${IDENTITY.fixed.employment}, ${IDENTITY.fixed.marital}, ${IDENTITY.fixed.children}, ${IDENTITY.fixed.homeowner}`);
+  log(`          Opinions vary per survey (${Object.keys(IDENTITY.variable).length} variable fields)`);
+  log(`          Fixed demographics NEVER change across surveys\n`);
 
   let fails = 0;
 
