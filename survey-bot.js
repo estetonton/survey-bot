@@ -8,9 +8,9 @@ puppeteer.use(StealthPlugin());
 const CHROME_PATH = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 const PROFILE_DIR = path.join(__dirname, 'profile');
 try {
-  ['SingletonLock', 'SingletonSocket', 'SingletonCookie'].forEach(f => {
+  ['SingletonLock', 'SingletonSocket', 'SingletonCookie', 'lockfile'].forEach(f => {
     const p = path.join(PROFILE_DIR, f);
-    if (fs.existsSync(p)) fs.unlinkSync(p);
+    if (fs.existsSync(p)) try { fs.unlinkSync(p); } catch(e2) { /* process holding lock */ }
   });
 } catch (e) {}
 const LOG_FILE = path.join(__dirname, 'bot.log');
