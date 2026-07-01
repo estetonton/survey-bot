@@ -6,8 +6,13 @@ const fs = require('fs');
 puppeteer.use(StealthPlugin());
 
 const CHROME_PATH = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
-const PROFILE_DIR = 'C:\\Users\\Alan Garzon\\AppData\\Local\\Google\\Chrome\\User Data';
-const PROFILE_NAME = 'Default';
+const PROFILE_DIR = path.join(__dirname, 'profile');
+try {
+  ['SingletonLock', 'SingletonSocket', 'SingletonCookie'].forEach(f => {
+    const p = path.join(PROFILE_DIR, f);
+    if (fs.existsSync(p)) fs.unlinkSync(p);
+  });
+} catch (e) {}
 const LOG_FILE = path.join(__dirname, 'bot.log');
 const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
 const CAPTCHA_FLAG = path.join(__dirname, 'captcha.txt');
@@ -573,10 +578,6 @@ async function main() {
   log('=== Survey Bot v5 (Universal Engine) ===');
   log(`Session: ${sessionState.completed} done / ${sessionState.disqualified} dq`);
 
-  log('Closing existing Chrome to unlock profile...');
-  try { require('child_process').execSync('taskkill /F /IM chrome.exe /T', { stdio: 'ignore' }); } catch(e) {}
-  await sleep(3000);
-
   browser = await puppeteer.launch({
     headless: false, executablePath: CHROME_PATH,
     defaultViewport: { width: 1280, height: 900 },
@@ -587,7 +588,6 @@ async function main() {
       '--window-size=1280,900',
       '--disable-features=ChromeWhatsNewUI',
       '--no-default-browser-check',
-      `--profile-directory=${PROFILE_NAME}`,
     ],
   });
 
