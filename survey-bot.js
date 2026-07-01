@@ -14,315 +14,436 @@ const STATE_FILE = path.join(__dirname, 'session.json');
 
 fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
 
-function log(msg) { const line = `[${new Date().toISOString()}] ${msg}`; console.log(line); fs.appendFileSync(LOG_FILE, line + '\n'); }
-
+const log = (msg) => { const l = `[${new Date().toISOString()}] ${msg}`; console.log(l); fs.appendFileSync(LOG_FILE, l + '\n'); };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-let sessionState = { answers: {}, surveyCount: 0, startTime: Date.now(), disqualified: 0, completed: 0 };
+let sessionState = { surveyCount: 0, completed: 0, disqualified: 0, startTime: Date.now() };
 try { if (fs.existsSync(STATE_FILE)) sessionState = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); } catch (e) {}
+const saveState = () => fs.writeFileSync(STATE_FILE, JSON.stringify(sessionState, null, 2));
 
-function saveState() { fs.writeFileSync(STATE_FILE, JSON.stringify(sessionState, null, 2)); }
-
-const answerBank = {
-  yesno: ['Yes', 'No', 'Sometimes', 'Usually', 'Never', 'Rarely', 'Definitely', 'Probably not'],
-  frequency: ['Daily', 'Weekly', 'Monthly', 'Several times a week', 'Several times a month', 'Once in a while', 'Never'],
-  satisfaction: ['Very satisfied', 'Satisfied', 'Neutral', 'Dissatisfied', 'Very dissatisfied'],
-  agreement: ['Strongly agree', 'Agree', 'Neutral', 'Disagree', 'Strongly disagree'],
-  likelihood: ['Extremely likely', 'Very likely', 'Somewhat likely', 'Not very likely', 'Not at all likely'],
-  quality: ['Excellent', 'Good', 'Average', 'Fair', 'Poor'],
-  age: ['18-24', '25-34', '35-44', '45-54', '55+'],
-  gender: ['Male', 'Female', 'Prefer not to say'],
-  income: ['Under $25,000', '$25,000 - $49,999', '$50,000 - $74,999', '$75,000 - $99,999', '$100,000+'],
-  education: ['High school', 'Some college', 'Bachelor\'s degree', 'Master\'s degree', 'PhD/Doctorate'],
-  employment: ['Employed full-time', 'Employed part-time', 'Self-employed', 'Student', 'Unemployed', 'Retired'],
-  region: ['North America', 'Europe', 'Asia', 'South America', 'Africa', 'Australia'],
-  household: ['1', '2', '3', '4', '5+'],
-  children: ['Yes', 'No'],
-  browsing: ['Desktop/Laptop', 'Mobile phone', 'Tablet', 'All of the above'],
-  social: ['Facebook', 'Instagram', 'Twitter/X', 'TikTok', 'YouTube', 'LinkedIn', 'Reddit', 'Snapchat', 'None of the above'],
-  streaming: ['Netflix', 'Amazon Prime', 'Hulu', 'Disney+', 'HBO Max', 'Apple TV+', 'None'],
-  shopping: ['Amazon', 'Walmart', 'Target', 'eBay', 'Etsy', 'Best Buy', 'Other'],
-  health: ['Excellent', 'Good', 'Fair', 'Poor'],
-  exercise: ['Daily', 'Several times a week', 'Once a week', 'Rarely', 'Never'],
+// ── GOLDEN PROFILE ──────────────────────────────────────────────────────────────
+const GOLDEN = {
+  age: '25-34',
+  gender: 'Female',
+  income: '$50,000 - $74,999',
+  education: "Bachelor's degree",
+  employment: 'Employed full-time',
+  occupation: 'Marketing Manager',
+  industry: 'Technology',
+  company: 'Mid-size company (50-999 employees)',
+  household: '3',
+  children: 'Yes',
+  childrenAges: '6-12',
+  marital: 'Married',
+  homeowner: 'Own',
+  residence: 'Suburbs',
+  region: 'United States',
+  state: 'California',
+  city: 'San Diego',
+  zip: '92101',
+  ethnicity: 'White / Caucasian',
+  health: 'Good',
+  exercise: 'Several times a week',
+  diet: 'Omnivore',
+  smoker: 'No',
+  alcohol: 'Socially',
+  shopping: 'Amazon',
+  shoppingFreq: 'Weekly',
+  streaming: 'Netflix',
+  streamingHours: '1-3 hours',
+  socialMedia: ['Facebook', 'Instagram', 'YouTube'],
+  browser: 'Desktop/Laptop',
+  mobile: 'iPhone',
+  carrier: 'Verizon',
+  pet: 'Dog',
+  travel: '1-2 times per year',
+  car: 'Toyota',
+  carAge: '3-5 years',
+  insurance: ['Health', 'Auto', 'Home'],
+  banking: ['Checking', 'Savings', 'Credit Card'],
+  invest: 'Yes',
+  crypto: 'No',
+  dining: '2-3 times per week',
+  cooking: 'Several times a week',
+  hobbies: ['Reading', 'Cooking', 'Hiking', 'Photography'],
 };
 
-function getAnswer(category) {
-  if (!sessionState.answers[category]) {
-    sessionState.answers[category] = {};
+// ── OFFERWALL DETECTION ──────────────────────────────────────────────────────────
+const OFFERWALLS = [
+  { name: 'Revenue Universe', domains: ['rev-u.com', 'revenueuniverse', 'revunetechnology'] },
+  { name: 'AdGem', domains: ['adgem.com', 'adgem'] },
+  { name: 'BitLabs', domains: ['bitlabs.com', 'bitlabs', 'bitlabsapi'] },
+  { name: 'Lootably', domains: ['lootably.com', 'lootably'] },
+  { name: 'CPX Research', domains: ['cpxresearch.com', 'cpx', 'cpxsurvey'] },
+  { name: 'Adscend Media', domains: ['adscendmedia.com', 'adscend'] },
+  { name: 'YourSurveys', domains: ['your-surveys.com', 'yoursurveys'] },
+  { name: 'Pollfish', domains: ['pollfish.com', 'pollfish'] },
+  { name: 'Toluna', domains: ['toluna.com', 'toluna'] },
+  { name: 'Samplicio', domains: ['samplicio.us', 'samplicio'] },
+];
+
+function detectOfferwall(url) {
+  const u = url.toLowerCase();
+  for (const w of OFFERWALLS) {
+    if (w.domains.some(d => u.includes(d))) return w.name;
   }
-  const answers = answerBank[category];
-  if (!answers) return 'Yes';
-  const used = Object.keys(sessionState.answers[category]);
-  const available = answers.filter(a => !used.includes(a));
-  if (available.length === 0) {
-    sessionState.answers[category] = {};
-    return answers[Math.floor(Math.random() * answers.length)];
-  }
-  const pick = available[Math.floor(Math.random() * available.length)];
-  sessionState.answers[category][pick] = true;
-  saveState();
-  return pick;
+  return 'Unknown';
 }
 
-function classifyQuestion(text) {
+// ── SURVEY TOPIC ANALYSIS ─────────────────────────────────────────────────────────
+const TOPICS = {
+  automotive: { keywords: ['car', 'auto', 'vehicle', 'driving', 'truck', 'toyota', 'honda', 'ford', 'tesla', 'gas', 'insurance auto'], profile: { car: 'Toyota Camry', carAge: '3-5 years', insurance: ['Health','Auto','Home'] } },
+  health: { keywords: ['health', 'medical', 'insurance health', 'doctor', 'hospital', 'pharma', 'drug', 'vitamin', 'wellness', 'condition', 'disease', 'symptom', 'covid'], profile: { health: 'Good', exercise: 'Several times a week', smoker: 'No', alcohol: 'Socially', diet: 'Omnivore' } },
+  technology: { keywords: ['tech', 'software', 'app', 'computer', 'laptop', 'smartphone', 'gadget', 'device', 'internet', 'wifi', 'streaming', 'gaming console'], profile: { browser: 'Desktop/Laptop', mobile: 'iPhone 15', hobbies: ['Reading','Cooking','Hiking','Photography','Gaming'] } },
+  gaming: { keywords: ['gaming', 'video game', 'console', 'xbox', 'playstation', 'nintendo', 'pc game', 'mobile game', 'esport', 'roblox', 'fortnite', 'minecraft'], profile: { hobbies: ['Gaming','Reading','Streaming'], streamingHours: '3-5 hours', browser: 'Desktop/Laptop' } },
+  finance: { keywords: ['finance', 'bank', 'credit card', 'mortgage', 'loan', 'invest', 'saving', 'retirement', 'crypto', 'stock', 'insurance life'], profile: { banking: ['Checking','Savings','Credit Card','Investment'], invest: 'Yes', income: '$75,000 - $99,999' } },
+  travel: { keywords: ['travel', 'vacation', 'hotel', 'flight', 'airline', 'cruise', 'trip', 'tourist', 'destination', 'travel insurance'], profile: { travel: '3-4 times per year', hobbies: ['Travel','Photography','Hiking'] } },
+  shopping: { keywords: ['shop', 'retail', 'store', 'online shop', 'amazon', 'walmart', 'target', 'fashion', 'clothing', 'beauty', 'cosmetic', 'brand'], profile: { shoppingFreq: 'Weekly', shopping: 'Amazon', dining: '3-4 times per week' } },
+  food: { keywords: ['food', 'restaurant', 'cooking', 'grocery', 'snack', 'beverage', 'drink', 'diet', 'nutrition', 'meal', 'recipe'], profile: { cooking: 'Daily', dining: '3-4 times per week', diet: 'Omnivore', hobbies: ['Cooking','Reading'] } },
+  entertainment: { keywords: ['movie', 'tv', 'show', 'netflix', 'hulu', 'disney', 'stream', 'music', 'concert', 'ticket', 'entertainment'], profile: { streamingHours: '3-5 hours', streaming: 'Netflix', hobbies: ['Streaming','Reading'] } },
+  parenting: { keywords: ['parent', 'child', 'kid', 'family', 'baby', 'toddler', 'school', 'education child', 'toy'], profile: { children: 'Yes', childrenAges: '6-12', marital: 'Married', household: '3', hobbies: ['Reading','Cooking','Photography'] } },
+  education: { keywords: ['education', 'college', 'university', 'school', 'student', 'learning', 'course', 'degree', 'online learning'], profile: { education: "Master's degree", occupation: 'Marketing Manager', industry: 'Technology' } },
+  pet: { keywords: ['pet', 'dog', 'cat', 'veterinary', 'pet food', 'animal'], profile: { pet: 'Dog', hobbies: ['Hiking','Photography'] } },
+  home: { keywords: ['home', 'house', 'garden', 'renovation', 'furniture', 'decor', 'appliance', 'cleaning', 'home improvement'], profile: { homeowner: 'Own', residence: 'Suburbs', hobbies: ['Cooking','Gardening'] } },
+  fitness: { keywords: ['fitness', 'gym', 'exercise', 'workout', 'sport', 'athletic', 'running', 'yoga', 'supplement'], profile: { exercise: 'Daily', health: 'Excellent', hobbies: ['Hiking','Running','Yoga'] } },
+};
+
+function analyzeOffer(text) {
   const t = text.toLowerCase();
-  if (/\b(yes|no|do you|are you|have you|is it|does it|would you|will you)\b/.test(t)) return 'yesno';
-  if (/\b(frequency|how often|times per|times a |per day|per week|per month)\b/.test(t)) return 'frequency';
-  if (/\b(satisf(y|ied)|satisfaction|how satisfied)\b/.test(t)) return 'satisfaction';
-  if (/\b(agree|agree|strongly|disagree|to what extent)\b/.test(t)) return 'agreement';
-  if (/\b(likely|likelihood|how likely|probability)\b/.test(t)) return 'likelihood';
-  if (/\b(quality|how would you rate|excellent|poor|rate the)\b/.test(t)) return 'quality';
-  if (/\b(age|how old|age group|year old)\b/.test(t)) return 'age';
-  if (/\b(gender|sex|male|female)\b/.test(t)) return 'gender';
-  if (/\b(income|salary|earn|make per year)\b/.test(t)) return 'income';
-  if (/\b(education|degree|college|university|high school)\b/.test(t)) return 'education';
-  if (/\b(employ|job|work|occupation|career|student|retired)\b/.test(t)) return 'employment';
-  if (/\b(region|country|live|located|area|state)\b/.test(t)) return 'region';
-  if (/\b(household|people living|family size|how many people)\b/.test(t)) return 'household';
-  if (/\b(children|kids|child|parent)\b/.test(t)) return 'children';
-  if (/\b(brows(e|er)|device|computer|phone|mobile|desktop)\b/.test(t)) return 'browsing';
-  if (/\b(social media|facebook|instagram|twitter|tiktok)\b/.test(t)) return 'social';
-  if (/\b(stream|netflix|hulu|disney|hbo|watch)\b/.test(t)) return 'streaming';
-  if (/\b(shopping|buy|purchase|store|amazon|walmart)\b/.test(t)) return 'shopping';
-  if (/\b(health|medical|condition|wellness|sick)\b/.test(t)) return 'health';
-  if (/\b(exercise|workout|gym|physical|active|sport)\b/.test(t)) return 'exercise';
+  const money = [...t.matchAll(/\$(\d+(?:\.\d{2})?)/g)].map(m => parseFloat(m[1]));
+  const reward = money.length > 0 ? Math.max(...money) : 0;
+  const topicScores = {};
+  for (const [topic, data] of Object.entries(TOPICS)) {
+    let score = 0;
+    for (const kw of data.keywords) {
+      if (t.includes(kw)) score++;
+    }
+    if (score > 0) topicScores[topic] = score;
+  }
+  const sortedTopics = Object.entries(topicScores).sort((a, b) => b[1] - a[1]);
+  const primaryTopic = sortedTopics.length > 0 ? sortedTopics[0][0] : null;
+  return { text: t, reward, topics: sortedTopics.map(s => s[0]), primaryTopic };
+}
+
+function getProfileForSurvey(offerText) {
+  const analysis = analyzeOffer(offerText);
+  const profile = { ...GOLDEN };
+  if (analysis.primaryTopic && TOPICS[analysis.primaryTopic]) {
+    Object.assign(profile, TOPICS[analysis.primaryTopic].profile);
+  }
+  return profile;
+}
+
+// ── ANSWER GENERATION ─────────────────────────────────────────────────────────
+let currentSurveyProfile = null;
+let usedAnswers = {};
+
+function resetProfile(offerText) {
+  currentSurveyProfile = getProfileForSurvey(offerText);
+  usedAnswers = {};
+}
+
+function findProfileValue(questionText) {
+  if (!currentSurveyProfile) return null;
+  const t = questionText.toLowerCase();
+
+  const map = [
+    ['age', ['age', 'how old', 'year old', 'age group']],
+    ['gender', ['gender', 'sex', 'male', 'female', 'man', 'woman']],
+    ['income', ['income', 'salary', 'earn', 'make per year', 'household income']],
+    ['education', ['education', 'degree', 'college', 'university', 'high school', 'level of school']],
+    ['employment', ['employ', 'job', 'work', 'occupation', 'career', 'working', 'student', 'retired', 'current status']],
+    ['occupation', ['occupation', 'job title', 'what do you do', 'position', 'role']],
+    ['industry', ['industry', 'sector', 'field of work', 'company type']],
+    ['company', ['company size', 'employer size', 'number of employee', 'company type']],
+    ['marital', ['marital', 'married', 'single', 'relationship', 'status']],
+    ['household', ['household', 'people in your home', 'family size', 'live with', 'how many people']],
+    ['children', ['children', 'kids', 'child', 'parent', 'have any']],
+    ['childrenAges', ['age of your child', 'oldest child', 'youngest child', 'child age']],
+    ['homeowner', ['home', 'house', 'own', 'rent', 'live', 'residence type', 'housing', 'property']],
+    ['residence', ['urban', 'rural', 'suburb', 'area', 'community type']],
+    ['region', ['region', 'country', 'where do you live', 'nation', 'located', 'area']],
+    ['state', ['state', 'province', 'region us']],
+    ['ethnicity', ['ethnic', 'race', 'background', 'hispanic', 'origin']],
+    ['health', ['health', 'wellness', 'medical condition', 'health status', 'how is your health']],
+    ['exercise', ['exercise', 'workout', 'physical activity', 'active', 'gym', 'sport']],
+    ['diet', ['diet', 'eat', 'food', 'meal', 'vegetarian', 'vegan', 'dietary']],
+    ['smoker', ['smoke', 'tobacco', 'cigarette', 'vape', 'nicotine']],
+    ['alcohol', ['alcohol', 'drink', 'beer', 'wine', 'liquor']],
+    ['shopping', ['shop', 'store', 'retail', 'where do you shop', 'online shopping']],
+    ['shoppingFreq', ['how often do you shop', 'shopping frequency', 'shop online']],
+    ['streaming', ['stream', 'netflix', 'hulu', 'disney', 'hbo', 'watch tv']],
+    ['streamingHours', ['hours of tv', 'watch per day', 'screen time', 'media consumption']],
+    ['socialMedia', ['social media', 'facebook', 'instagram', 'twitter', 'tiktok', 'social network']],
+    ['mobile', ['smartphone', 'phone', 'iphone', 'android', 'mobile device', 'cell phone']],
+    ['carrier', ['carrier', 'mobile provider', 'cell provider', 'verizon', 'at&t', 't-mobile']],
+    ['pet', ['pet', 'dog', 'cat', 'animal']],
+    ['travel', ['travel', 'vacation', 'trip', 'holiday', 'flight']],
+    ['car', ['car', 'vehicle', 'automobile', 'drive']],
+    ['carAge', ['car age', 'vehicle age', 'how old is your car', 'when did you buy']],
+    ['insurance', ['insurance', 'coverage', 'policy']],
+    ['banking', ['bank', 'checking', 'saving', 'account', 'banking product']],
+    ['invest', ['invest', 'stock', 'bond', 'mutual fund', 'retirement account', '401k']],
+    ['crypto', ['crypto', 'bitcoin', 'ethereum', 'digital currency', 'nft']],
+    ['dining', ['dining', 'restaurant', 'eat out', 'takeout']],
+    ['cooking', ['cooking', 'cook', 'meal prep', 'homemade']],
+    ['hobbies', ['hobby', 'interest', 'free time', 'leisure', 'spare time', 'activity']],
+    ['browser', ['device', 'computer', 'laptop', 'desktop', 'tablet', 'browsing device', 'primary device']],
+  ];
+
+  for (const [key, patterns] of map) {
+    if (patterns.some(p => t.includes(p))) {
+      const val = currentSurveyProfile[key];
+      if (val) return val;
+    }
+  }
   return null;
 }
 
-function getSmartText(fieldText) {
-  const known = {
-    email: () => `user${Math.floor(Math.random() * 99999)}@email.com`,
-    phone: () => '555-' + String(Math.floor(Math.random() * 900) + 100).padStart(3, '0') + '-' + String(Math.floor(Math.random() * 9000) + 1000).padStart(4, '0'),
-    zip: () => String(Math.floor(Math.random() * 90000) + 10000),
-    postal: () => String(Math.floor(Math.random() * 90000) + 10000),
-    code: () => String(Math.floor(Math.random() * 90000) + 10000),
-    name: () => ['Alex', 'Jordan', 'Morgan', 'Casey', 'Riley', 'Taylor', 'Sam', 'Jamie'][Math.floor(Math.random() * 8)],
-    first: () => ['Alex', 'Jordan', 'Morgan', 'Casey', 'Riley', 'Taylor', 'Sam', 'Jamie'][Math.floor(Math.random() * 8)],
-    last: () => ['Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Garcia', 'Miller', 'Davis'][Math.floor(Math.random() * 8)],
-    city: () => ['New York', 'Los Angeles', 'Chicago', 'Houston', 'Phoenix', 'Philadelphia', 'San Antonio', 'San Diego'][Math.floor(Math.random() * 8)],
-    state: () => ['California', 'Texas', 'Florida', 'New York', 'Illinois', 'Pennsylvania', 'Ohio', 'Georgia'][Math.floor(Math.random() * 8)],
-    occupation: () => ['Software Engineer', 'Teacher', 'Nurse', 'Manager', 'Sales Representative', 'Analyst', 'Consultant', 'Administrator'][Math.floor(Math.random() * 8)],
-    company: () => ['Tech Corp', 'Global Solutions', 'Innovation Inc', 'Premier Services', 'Atlas Group', 'Summit Industries'][Math.floor(Math.random() * 6)],
-  };
-  for (const [key, fn] of Object.entries(known)) {
-    if (fieldText.includes(key)) return fn();
+function getSmartAnswer(questionText, elementType = 'radio') {
+  const fromProfile = findProfileValue(questionText);
+  if (fromProfile) {
+    if (Array.isArray(fromProfile)) return fromProfile[Math.floor(Math.random() * fromProfile.length)];
+    return fromProfile;
   }
-  const categories = Object.keys(answerBank);
-  const cat = categories[Math.floor(Math.random() * categories.length)];
-  return getAnswer(cat);
+
+  const t = questionText.toLowerCase();
+
+  if (elementType === 'checkbox') return Math.random() > 0.4;
+
+  if (t.includes('yes') || t.includes('do you') || t.includes('are you') || t.includes('have you') || t.includes('is it') || t.includes('does it') || t.includes('would you') || t.includes('will you') || t.includes('did you')) {
+    return 'Yes';
+  }
+  if (t.includes('frequency') || t.includes('how often') || t.includes('per day') || t.includes('per week') || t.includes('per month')) {
+    return 'Several times a week';
+  }
+  if (t.includes('satisf') || t.includes('how satisfied') || t.includes('rate your')) return 'Satisfied';
+  if (t.includes('agree') || t.includes('extent')) return 'Agree';
+  if (t.includes('likely') || t.includes('how likely')) return 'Very likely';
+  if (t.includes('quality') || t.includes('rate the') || t.includes('excellent')) return 'Good';
+  if (t.includes('recommend')) return 'Very likely';
+  if (t.includes('importance') || t.includes('important')) return 'Important';
+  if (t.includes('often')) return 'Often';
+
+  return null;
 }
 
-async function captchaGuard(page) {
-  const captchaSelectors = [
+async function getPageText(framePage, selector) {
+  try {
+    const el = await framePage.$(selector);
+    return el ? await el.evaluate(e => e.textContent.trim()) : '';
+  } catch (e) { return ''; }
+}
+
+// ── CAPTCHA HANDLING ─────────────────────────────────────────────────────────
+async function checkCaptcha(page) {
+  const sels = [
     'iframe[src*="recaptcha"]', 'iframe[src*="turnstile"]', 'iframe[src*="hcaptcha"]',
     '.g-recaptcha', '.cf-turnstile', '.h-captcha',
     '#captcha', '[class*="captcha"]', '[id*="captcha"]',
     'iframe[src*="challenges.cloudflare.com"]',
-    '[aria-label*="captcha"]',
-    'div[style*="visibility: visible"][style*="position: absolute"]',
   ];
-  for (const sel of captchaSelectors) {
-    if (await page.$(sel).catch(() => null)) {
-      log('*** CAPTCHA DETECTED ***');
-      const shot = path.join(SCREENSHOT_DIR, `captcha-${Date.now()}.png`);
-      await page.screenshot({ path: shot, fullPage: false }).catch(() => {});
-      for (let i = 0; i < 5; i++) { try { process.stdout.write('\x07'); } catch (e) {} }
-      fs.writeFileSync(CAPTCHA_FLAG, `CAPTCHA at ${new Date().toISOString()}\nSolve in browser! Screenshot: ${shot}\n`);
-      log(`Screenshot: ${shot}`);
-      const start = Date.now();
-      while (Date.now() - start < 180000) {
-        if (!(await page.$(sel).catch(() => false))) {
-          log('Captcha solved!');
-          fs.unlinkSync(CAPTCHA_FLAG);
-          return true;
-        }
-        await sleep(1000);
-      }
-      log('Captcha timeout');
-      return false;
-    }
+  for (const sel of sels) {
+    if (await page.$(sel).catch(() => null)) return sel;
   }
-  return true;
+  return null;
 }
 
-async function surveyBrain(framePage, depth = 0) {
-  if (depth > 3) return false;
-  if (!(await captchaGuard(framePage))) return false;
-
-  const url = framePage.url().toLowerCase();
-  if (url.includes('thank') || url.includes('complete') || url.includes('finished') || url.includes('success') || url.includes('congratulations')) {
-    log('Completion page detected');
-    await sleep(2000);
-    sessionState.completed++;
-    saveState();
-    return true;
+async function handleCaptcha(page) {
+  const sel = await checkCaptcha(page);
+  if (!sel) return true;
+  log('*** CAPTCHA ***');
+  const shot = path.join(SCREENSHOT_DIR, `captcha-${Date.now()}.png`);
+  await page.screenshot({ path: shot }).catch(() => {});
+  for (let i = 0; i < 5; i++) { try { process.stdout.write('\x07'); } catch (e) {} }
+  fs.writeFileSync(CAPTCHA_FLAG, `CAPTCHA at ${new Date().toISOString()}\nSolve in browser! Screenshot: ${shot}`);
+  log(`Captcha screenshot: ${shot}`);
+  const start = Date.now();
+  while (Date.now() - start < 180000) {
+    if (!(await page.$(sel).catch(() => null))) { log('Captcha solved!'); try { fs.unlinkSync(CAPTCHA_FLAG); } catch(e) {} return true; }
+    await sleep(1000);
   }
-  if (url.includes('disqualif') || url.includes('screen') || url.includes('unfortunately') || url.includes('not a match') || url.includes('quotafull')) {
-    log('Disqualified from survey');
-    sessionState.disqualified++;
-    saveState();
-    return true;
-  }
+  log('Captcha timeout');
+  return false;
+}
 
+// ── SURVEY ANSWERING ENGINE ───────────────────────────────────────────────────
+async function answerPage(framePage) {
+  if (!(await handleCaptcha(framePage))) return false;
   let interacted = false;
   const frames = [framePage, ...framePage.frames()];
 
   for (const f of frames) {
     try {
-      const answered = await f.evaluate(() => {
-        let count = 0;
-        const used = new Set();
+      const answered = await f.evaluate((profileStr) => {
+        const p = JSON.parse(profileStr);
+        let c = 0;
+        const done = new Set();
 
+        // Label extraction helper (looks for text near the input)
+        const getQuestionText = (el) => {
+          const label = el.closest('div, fieldset, li, .question, .row, .form-group');
+          if (label) {
+            const clone = label.cloneNode(true);
+            const inputs = clone.querySelectorAll('input, select, textarea, button');
+            inputs.forEach(inp => inp.remove());
+            return (clone.textContent || '').trim().slice(0, 200);
+          }
+          return el.getAttribute('aria-label') || el.placeholder || el.id || '';
+        };
+
+        // Radios
         document.querySelectorAll('input[type="radio"]').forEach(r => {
-          const name = r.name || r.id || '';
-          if (!name || used.has(name)) return;
-          const group = document.querySelectorAll(`input[type="radio"][name="${r.name}"]`);
-          const midIdx = Math.floor(group.length / 2);
-          const pick = group[Math.min(midIdx + Math.floor(Math.random() * 2 - 1), group.length - 1)];
-          if (!pick.checked) { pick.click(); count++; }
-          used.add(name);
+          const name = r.name || '';
+          if (!name || done.has(name)) return;
+          const group = [...document.querySelectorAll(`input[type="radio"][name="${CSS.escape(name)}"]`)];
+          if (group.length === 0) return;
+          const qText = getQuestionText(group[0]);
+          const preferred = p[Object.keys(p).find(k => qText.toLowerCase().includes(k.toLowerCase()))];
+          let pick;
+          if (preferred && Array.isArray(preferred)) {
+            pick = group.find(g => g.value && preferred.some(pv => g.value.toLowerCase().includes(pv.toLowerCase())));
+          } else if (preferred) {
+            pick = group.find(g => g.value && g.value.toLowerCase().includes(String(preferred).toLowerCase()));
+          }
+          if (!pick) {
+            const values = group.map(g => ({ el: g, v: g.value })).filter(x => x.v);
+            if (values.length <= 2) pick = values.find(v => v.v === 'Yes' || v.v === '1' || v.v === 'true')?.el || values[0]?.el;
+            else pick = values[Math.floor(values.length * 0.4)]?.el;
+          }
+          if (pick && !pick.checked) { pick.click(); c++; }
+          done.add(name);
         });
 
-        document.querySelectorAll('input[type="checkbox"]').forEach((c, i) => {
-          if (i < 3 && Math.random() > 0.4 && !c.checked) { c.click(); count++; }
+        // Checkboxes
+        document.querySelectorAll('input[type="checkbox"]').forEach((cb, i) => {
+          if (cb.checked || i >= 3) return;
+          const qText = getQuestionText(cb);
+          const val = cb.value.toLowerCase();
+          if (i === 0 || Math.random() > 0.4) { cb.click(); c++; }
         });
 
+        // Selects
         document.querySelectorAll('select').forEach(s => {
-          const opts = [...s.querySelectorAll('option')].filter(o => o.value && o.value !== s.value);
-          const mid = Math.floor(opts.length / 2);
-          const pick = opts[Math.min(mid + Math.floor(Math.random() * 2 - 1), opts.length - 1)];
-          if (pick) { s.value = pick.value; s.dispatchEvent(new Event('change', { bubbles: true })); count++; }
+          const opts = [...s.options].filter(o => o.value && o.value !== s.value);
+          if (opts.length === 0) return;
+          const qText = getQuestionText(s);
+          const preferred = p[Object.keys(p).find(k => qText.toLowerCase().includes(k.toLowerCase()))];
+          let pick;
+          if (preferred) pick = opts.find(o => o.text.toLowerCase().includes(String(preferred).toLowerCase()));
+          if (!pick) pick = opts[Math.floor(opts.length * 0.4)];
+          if (pick) { s.value = pick.value; s.dispatchEvent(new Event('change', { bubbles: true })); c++; }
         });
 
+        // Text inputs
         document.querySelectorAll('input[type="text"], input:not([type]), input[type="number"], textarea').forEach(t => {
           if (t.value || t.offsetParent === null) return;
-          const p = (t.placeholder || '').toLowerCase();
-          const id = (t.id || '').toLowerCase();
-          const label = (document.querySelector(`label[for="${t.id}"]`) || {}).textContent || '';
-          const ctx = p + ' ' + id + ' ' + label.toLowerCase();
-
-          if (ctx.includes('email')) t.value = `user${Date.now()}@email.com`;
-          else if (ctx.includes('phone')) t.value = '555-0100';
-          else if (ctx.includes('zip') || ctx.includes('postal')) t.value = '10001';
-          else if (ctx.includes('name') || ctx.includes('first') || ctx.includes('last')) t.value = ['Alex','Jordan','Morgan','Taylor'][Math.floor(Math.random()*4)];
-          else if (ctx.includes('code')) t.value = String(Math.floor(Math.random() * 99999));
-          else t.value = ['Good','Fine','Yes','No','Sometimes','Daily','Weekly','Never','3-4 times','Once or twice','Several'][Math.floor(Math.random()*11)];
-
+          const ctx = (t.placeholder + ' ' + t.id + ' ' + getQuestionText(t)).toLowerCase();
+          if (ctx.includes('email')) t.value = `user${Date.now()}@mail.com`;
+          else if (ctx.includes('phone')) t.value = '555-0123';
+          else if (ctx.includes('zip') || ctx.includes('postal')) t.value = '92101';
+          else if (ctx.includes('name') || ctx.includes('first') || ctx.includes('last')) t.value = ['Jessica','Ashley','Sarah','Amanda'][Math.floor(Math.random()*4)];
+          else if (ctx.includes('city')) t.value = 'San Diego';
+          else if (ctx.includes('state')) t.value = 'California';
+          else t.value = ['Yes','Daily','Weekly','Monthly','3-4 times','Good','Fine','Sometimes'][Math.floor(Math.random()*8)];
           t.dispatchEvent(new Event('input', { bubbles: true }));
           t.dispatchEvent(new Event('change', { bubbles: true }));
-          count++;
+          c++;
         });
 
-        const btns = [...document.querySelectorAll('button, input[type="submit"], input[type="image"], a[role="button"], .btn, [class*="button"]')];
+        // Next buttons
+        const btns = [...document.querySelectorAll('button, input[type="submit"], input[type="image"], [role="button"], .btn, [class*="button"], a:has(span)')];
         for (const btn of btns) {
           const txt = (btn.textContent || btn.value || '').trim().toLowerCase();
-          if (['next','submit','continue','send','done','ok','finish','complete','yes','confirm','forward','proceed','>>','>','start survey','begin survey','i agree'].some(k => txt.includes(k))) {
-            if (btn.offsetParent !== null) { btn.click(); count++; break; }
+          if (['next','submit','continue','send','done','ok','finish','complete','yes','confirm','forward','proceed','>>','>','start','begin','i agree','accept','take survey'].some(k => txt.includes(k))) {
+            if (btn.offsetParent !== null) { btn.click(); c++; break; }
           }
         }
-        return count;
-      });
+        return c;
+      }, JSON.stringify(currentSurveyProfile || GOLDEN));
       if (answered > 0) interacted = true;
-    } catch (e) {
-      if (depth < 2 && f !== framePage) {
-        try {
-          const innerAnswered = await surveyBrain(f, depth + 1);
-          if (innerAnswered) interacted = true;
-        } catch (innerE) {}
-      }
-    }
+    } catch (e) {}
   }
   return interacted;
 }
 
-async function handleSurveyPopup(popup) {
-  try {
-    await popup.waitForSelector('body', { timeout: 20000 });
-  } catch (e) {
-    log('Popup had no body, closing');
-    try { popup.close(); } catch(e2) {}
-    return;
-  }
+async function runSurvey(popup) {
+  try { await popup.waitForSelector('body', { timeout: 20000 }); } catch (e) { try { popup.close(); } catch(e2) {} return; }
 
-  log('Survey popup detected, running brain...');
   const url = popup.url().toLowerCase();
-  log(`Survey URL: ${url.slice(0, 200)}`);
+  const offerwall = detectOfferwall(url);
+  log(`Popup: ${offerwall} | ${url.slice(0, 150)}`);
 
   const start = Date.now();
-  let lastActivity = Date.now();
-  let idleLoops = 0;
+  let lastAction = Date.now();
 
-  while (Date.now() - start < 300000) {
-    if (Date.now() - lastActivity > 30000) idleLoops++;
-    else idleLoops = 0;
+  while (Date.now() - start < 360000) {
+    if (popup.isClosed()) return;
 
-    if (idleLoops > 3) {
-      log('No activity for 90s, closing survey');
-      break;
+    const cu = popup.url().toLowerCase();
+    if (cu.includes('thank') || cu.includes('complete') || cu.includes('congratulations') || cu.includes('success') || cu.includes('finished')) {
+      log('SURVEY COMPLETED!'); sessionState.completed++; saveState(); await sleep(3000); break;
+    }
+    if (cu.includes('disqualif') || cu.includes('quotafull') || cu.includes('not a match') || cu.includes('unfortunately') || cu.includes('screen') || cu.includes('terminated')) {
+      log('Screen-out'); sessionState.disqualified++; saveState(); await sleep(2000); break;
     }
 
-    const currentUrl = popup.url().toLowerCase();
-    if (currentUrl.includes('thank') || currentUrl.includes('complete') || currentUrl.includes('congratulations')) {
-      log('Survey completed!');
-      sessionState.completed++;
-      saveState();
-      await sleep(3000);
-      break;
-    }
-    if (currentUrl.includes('disqualif') || currentUrl.includes('quotafull') || currentUrl.includes('not a match')) {
-      log('Screen-out / disqualified');
-      sessionState.disqualified++;
-      saveState();
-      await sleep(2000);
-      break;
+    if (Date.now() - lastAction > 60000) {
+      log('60s idle, closing survey'); break;
     }
 
-    try {
-      const acted = await surveyBrain(popup);
-      if (acted) {
-        lastActivity = Date.now();
-        await captchaGuard(popup);
-      }
-    } catch (e) {
-      log(`Popup loop error: ${e.message.slice(0, 100)}`);
-    }
-
-    if (popup.isClosed()) break;
-    await sleep(1500 + Math.random() * 2000);
+    const acted = await answerPage(popup);
+    if (acted) lastAction = Date.now();
+    await sleep(2000 + Math.random() * 2000);
   }
 
-  try { if (!popup.isClosed()) await popup.close(); } catch (e) {}
-  log('Survey popup closed');
+  try { if (!popup.isClosed()) popup.close(); } catch(e) {}
+  log('Popup closed');
 }
 
+// ── OFFER DISCOVERY ────────────────────────────────────────────────────────
+function analyzeFreecashOffers(page) {
+  return page.evaluate(() => {
+    const items = [];
+    const seen = new Set();
+    document.querySelectorAll('a, button, [role="button"], [class*="offer"], [class*="card"], [class*="tile"], [class*="item"], [class*="wall"], [class*="ad"]').forEach(el => {
+      const text = (el.textContent || '').trim();
+      const href = el.href || el.getAttribute('data-url') || el.getAttribute('data-href') || '';
+      const key = text.slice(0, 50) + href;
+      if (text.length < 8 || seen.has(key)) return;
+      seen.add(key);
+      const rect = el.getBoundingClientRect();
+      if (rect.top < window.innerHeight && rect.bottom > 0 && rect.width > 50) {
+        const money = [...text.matchAll(/\$(\d+(?:\.\d{2})?)/g)].map(m => parseFloat(m[1]));
+        items.push({ text: text.slice(0, 200), href, money: money.length ? Math.max(...money) : 0, isSurvey: text.toLowerCase().includes('survey') || text.toLowerCase().includes('opinion') || text.toLowerCase().includes('answer') });
+      }
+    });
+    return items.sort((a, b) => (b.isSurvey ? 10 : 0) + b.money - (a.isSurvey ? 10 : 0) - a.money);
+  });
+}
+
+// ── MAIN ────────────────────────────────────────────────────────────────
 let browser;
 
 async function main() {
-  log('=== Survey Bot v3 (Intelligent) ===');
-  log(`Session: ${sessionState.completed} completed, ${sessionState.disqualified} disqualified, ${sessionState.surveyCount} started`);
+  log('=== Survey Bot v4 (Intelligent Profile) ===');
+  log(`Session: ${sessionState.completed} completed / ${sessionState.disqualified} disqualified`);
 
   browser = await puppeteer.launch({
-    headless: false,
-    executablePath: CHROME_PATH,
+    headless: false, executablePath: CHROME_PATH,
     defaultViewport: { width: 1280, height: 900 },
     userDataDir: PROFILE_DIR,
     args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-blink-features=AutomationControlled', '--window-size=1280,900'],
   });
 
   const page = await browser.newPage();
-  await page.evaluateOnNewDocument(() => {
-    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-  });
+  await page.evaluateOnNewDocument(() => { Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); });
 
   const activePopups = new Set();
-
   page.on('popup', async (popup) => {
-    if (activePopups.size >= 2) {
-      try { popup.close(); } catch(e) {}
-      return;
-    }
+    if (activePopups.size >= 2) { try { popup.close(); } catch(e) {} return; }
     activePopups.add(popup);
-    await handleSurveyPopup(popup);
+    await runSurvey(popup);
     activePopups.delete(popup);
     try { await page.bringToFront(); } catch(e) {}
   });
@@ -330,110 +451,62 @@ async function main() {
   await page.goto('https://freecash.com/en', { waitUntil: 'domcontentloaded', timeout: 30000 });
   await sleep(5000);
 
-  const isLoggedIn = await page.evaluate(() =>
-    document.body.innerText.includes('Cashout') || !!document.querySelector('[href*="cashout"]')
-  );
-
-  if (!isLoggedIn) {
-    log('Waiting for login...');
-    for (let i = 0; i < 60; i++) {
-      await sleep(5000);
-      const ok = await page.evaluate(() =>
-        document.body.innerText.includes('Cashout') || !!document.querySelector('[href*="cashout"]')
-      );
-      if (ok) { log('Logged in!'); break; }
-    }
+  if (!(await page.evaluate(() => document.body.innerText.includes('Cashout') || !!document.querySelector('[href*="cashout"]')))) {
+    log('Login required...');
+    for (let i = 0; i < 60; i++) { await sleep(5000); if (await page.evaluate(() => document.body.innerText.includes('Cashout'))) { log('Logged in'); break; } }
   }
 
-  log('\n=== Survey Bot running ===');
-  log(`Completed this session: ${sessionState.completed}`);
-  log(`Disqualified: ${sessionState.disqualified}`);
-  log(`Watch the browser window. Solve captchas when prompted.\n`);
+  log('\nProfile loaded: Female, 25-34, $50-74k, Bachelor, Full-time, Married, 1 child, Homeowner\n');
 
   let fails = 0;
 
   while (true) {
     try {
-      if (activePopups.size > 0) {
-        await sleep(15000);
-        continue;
-      }
+      if (activePopups.size > 0) { await sleep(15000); continue; }
 
       await page.goto('https://freecash.com/en', { waitUntil: 'domcontentloaded', timeout: 20000 });
       await sleep(5000);
 
-      for (let scroll = 0; scroll < 5; scroll++) {
-        await page.evaluate(() => window.scrollBy(0, 400));
-        await sleep(800 + Math.random() * 500);
-      }
+      for (let s = 0; s < 6; s++) { await page.evaluate(() => window.scrollBy(0, 400)); await sleep(600 + Math.random() * 400); }
 
-      const offerTexts = await page.evaluate(() => {
-        const items = [];
-        document.querySelectorAll('a, button, [role="button"], [class*="offer"], [class*="card"], [class*="item"], [class*="tile"]').forEach(el => {
-          const text = (el.textContent || '').trim();
-          const href = el.href || '';
-          if (text && text.length > 5 && !items.find(i => i.text === text)) {
-            items.push({ text: text.slice(0, 120), href, rect: el.getBoundingClientRect() });
-          }
-        });
-        return items.filter(i => i.rect && i.rect.top < window.innerHeight && i.rect.bottom > 0);
-      });
+      const offers = await analyzeFreecashOffers(page);
+      const surveyOffers = offers.filter(o => o.isSurvey || o.money > 0);
 
-      const clicks = offerTexts.filter(o => {
-        const t = o.text.toLowerCase();
-        const worthScore = (t.match(/\$\d+/g) || []).reduce((sum, n) => sum + parseFloat(n.replace('$','')), 0);
-        return worthScore > 0 || t.includes('survey') || t.includes('start') || t.includes('play now') || t.includes('get paid');
-      }).sort((a, b) => {
-        const aVal = (a.text.match(/\$\d+/g) || []).reduce((s, n) => s + parseFloat(n.replace('$','')), 0);
-        const bVal = (b.text.match(/\$\d+/g) || []).reduce((s, n) => s + parseFloat(n.replace('$','')), 0);
-        return bVal - aVal;
-      });
-
-      if (clicks.length > 0) {
-        const target = clicks[Math.floor(Math.random() * Math.min(clicks.length, 3))];
-        log(`Clicking offer: "${target.text.slice(0, 80)}"`);
+      if (surveyOffers.length > 0) {
+        const analysis = analyzeOffer(surveyOffers[0].text);
+        log(`Best offer: $${analysis.reward} | Topic: ${analysis.primaryTopic || 'general'} | "${surveyOffers[0].text.slice(0, 100)}"`);
         fails = 0;
 
-        const clickable = await page.$(`a[href="${target.href}"]`);
-        if (clickable) {
-          await clickable.click().catch(() => {});
-          await sleep(5000 + Math.random() * 3000);
-          sessionState.surveyCount++;
-          saveState();
+        const a = analysis;
+        const topicStr = a.primaryTopic ? ` (${a.primaryTopic})` : '';
+        log(`→ Profile adapted for: ${a.primaryTopic || 'general survey'}${topicStr}`);
+
+        resetProfile(surveyOffers[0].text);
+
+        const els = await page.$$('a, button, [role="button"]');
+        let clicked = false;
+        for (const el of els) {
+          const t = (await el.evaluate(e => e.textContent.trim())).slice(0, 100);
+          if (surveyOffers[0].text.includes(t) && t.length > 5) {
+            try { await el.click(); clicked = true; sessionState.surveyCount++; saveState(); break; } catch(e) {}
+          }
+        }
+        if (clicked) {
+          log('Offer clicked, waiting for popup...');
+          await sleep(8000 + Math.random() * 4000);
         }
       } else {
         fails++;
-        log(`No visible offers found (attempt ${fails})`);
-        if (fails >= 5) {
-          log('5 failed scans. Refreshing page...');
-          await page.reload({ waitUntil: 'domcontentloaded' });
-          await sleep(5000);
-          fails = 0;
-        }
+        if (fails >= 5) { log('5 fails, refreshing...'); await page.reload(); await sleep(5000); fails = 0; }
+        else log(`No offers (${fails})`);
       }
-
-      await captchaGuard(page);
-      log(`Status: ${sessionState.completed} done, ${sessionState.disqualified} dq, ${fails} failed scans`);
     } catch (e) {
-      log(`Main error: ${e.message.slice(0, 150)}`);
+      log(`Error: ${e.message.slice(0, 120)}`);
       fails++;
     }
-
-    await sleep(25000 + Math.random() * 10000);
+    await sleep(20000 + Math.random() * 10000);
   }
 }
 
-process.on('SIGINT', async () => {
-  log('Shutting down...');
-  saveState();
-  if (browser) await browser.close();
-  process.exit(0);
-});
-
-main().catch(async (e) => {
-  log(`Fatal: ${e.message}`);
-  console.error(e);
-  saveState();
-  if (browser) await browser.close();
-  process.exit(1);
-});
+process.on('SIGINT', async () => { log('Shutdown'); saveState(); if (browser) await browser.close(); process.exit(0); });
+main().catch(async e => { log(`Fatal: ${e.message}`); saveState(); if (browser) await browser.close(); process.exit(1); });
