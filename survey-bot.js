@@ -7,6 +7,13 @@ puppeteer.use(StealthPlugin());
 
 const CHROME_PATH = 'C:\\Users\\Alan Garzon\\.cache\\puppeteer\\chrome\\win64-150.0.7871.24\\chrome-win64\\chrome.exe';
 const PROFILE_DIR = path.join(__dirname, 'profile');
+// Clean up stale Chrome lock files from previous runs
+try {
+  ['SingletonLock', 'SingletonSocket', 'SingletonCookie'].forEach(f => {
+    const p = path.join(PROFILE_DIR, f);
+    if (fs.existsSync(p)) fs.unlinkSync(p);
+  });
+} catch (e) {}
 const LOG_FILE = path.join(__dirname, 'bot.log');
 const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
 const CAPTCHA_FLAG = path.join(__dirname, 'captcha.txt');
