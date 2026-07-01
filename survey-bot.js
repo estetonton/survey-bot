@@ -613,16 +613,21 @@ async function main() {
   log('===========================================\n');
 
   let loggedIn = false;
+  log('Checking for login (looks for user avatar/name, NOT just "Cashout" text)...');
   for (let i = 0; i < 120; i++) {
-    const hasCashout = await page.evaluate(() => {
-      const text = document.body.innerText;
-      return text.includes('Cashout') || text.includes('cashout');
-    }).catch(() => false);
-    const hasUserMenu = await page.evaluate(() => {
-      return !!document.querySelector('[class*="avatar"], [href*="cashout"], [class*="user-menu"]');
-    }).catch(() => false);
-    if (hasCashout || hasUserMenu) { loggedIn = true; break; }
-    if (i % 6 === 0) log(`Waiting for login... (${Math.round(i * 5 / 60)}min)`);
+    const check = await page.evaluate(() => {
+      const body = document.body.innerText;
+      const hasSignIn = body.includes('Sign In') || body.includes('Sign in');
+      const hasSignUp = body.includes('Sign Up') || body.includes('Sign up');
+      const hasCashout = body.includes('Cashout');
+      const hasAvatar = !!document.querySelector('[class*="avatar"], [class*="Avatar"], [class*="user-menu"], [class*="UserMenu"], [data-testid*="user"], [class*="profile"]');
+      // Logged in = Cashout visible AND no Sign In/Sign Up buttons
+      const noSignButtons = !hasSignIn && !hasSignUp;
+      return { hasCashout, hasSignIn, hasSignUp, hasAvatar, noSignButtons, loggedIn: (hasCashout && noSignButtons) || hasAvatar };
+    }).catch(() => ({ loggedIn: false }));
+
+    if (check.loggedIn) { loggedIn = true; break; }
+    if (i % 6 === 0) log(`Waiting for login... (${Math.round(i * 5 / 60)}min) - sign buttons: ${check.hasSignIn ? 'yes' : 'no'}, cashout: ${check.hasCashout ? 'yes' : 'no'}`);
     await sleep(5000);
   }
 
