@@ -579,34 +579,18 @@ async function main() {
   log('=== Survey Bot v5 (Universal Engine) ===');
   log(`Session: ${sessionState.completed} done / ${sessionState.disqualified} dq`);
 
-  const debugPort = process.env.CHROME_DEBUG;
-  if (debugPort) {
-    log(`Connecting to existing Chrome at 127.0.0.1:${debugPort}...`);
-    browser = await puppeteer.connect({ browserURL: `http://127.0.0.1:${debugPort}` }).catch(async (e) => {
-      log(`Connection failed: ${e.message}. Launching new Chrome instead.`);
-      browser = await puppeteer.launch({
-        headless: false, executablePath: CHROME_PATH,
-        defaultViewport: { width: 1280, height: 900 },
-        userDataDir: PROFILE_DIR,
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-blink-features=AutomationControlled', '--window-size=1280,900'],
-      });
-    });
-    if (!browser) {
-      browser = await puppeteer.launch({
-        headless: false, executablePath: CHROME_PATH,
-        defaultViewport: { width: 1280, height: 900 },
-        userDataDir: PROFILE_DIR,
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-blink-features=AutomationControlled', '--window-size=1280,900'],
-      });
-    }
-  } else {
-    browser = await puppeteer.launch({
-      headless: false, executablePath: CHROME_PATH,
-      defaultViewport: { width: 1280, height: 900 },
-      userDataDir: PROFILE_DIR,
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-blink-features=AutomationControlled', '--window-size=1280,900'],
-    });
-  }
+  browser = await puppeteer.launch({
+    headless: false, executablePath: CHROME_PATH,
+    defaultViewport: { width: 1280, height: 900 },
+    userDataDir: PROFILE_DIR,
+    args: [
+      '--no-sandbox', '--disable-setuid-sandbox',
+      '--disable-blink-features=AutomationControlled',
+      '--window-size=1280,900',
+      '--disable-features=ChromeWhatsNewUI',
+      '--no-default-browser-check',
+    ],
+  });
 
   const page = await browser.newPage();
   await page.evaluateOnNewDocument(() => { Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); });
