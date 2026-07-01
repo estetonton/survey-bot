@@ -593,12 +593,38 @@ async function main() {
   });
 
   await page.goto('https://freecash.com/en', { waitUntil: 'domcontentloaded', timeout: 30000 });
-  await sleep(5000);
+  await sleep(3000);
 
-  if (!(await page.evaluate(() => document.body.innerText.includes('Cashout')))) {
-    log('Login required...');
-    for (let i = 0; i < 60; i++) { await sleep(5000); if (await page.evaluate(() => document.body.innerText.includes('Cashout'))) { log('Logged in'); break; } }
+  // ===== LOGIN GATE =====
+  // Bot does ABSOLUTELY NOTHING until user logs in manually
+  await page.evaluate(() => { document.title = '🔴 SURVEY BOT - LOG IN FIRST 🔴'; });
+  log('=== WAITING FOR LOGIN ===');
+  log('Browser is open. Log in to Freecash manually.');
+  log('The bot will do nothing until you log in.\n');
+
+  let loggedIn = false;
+  for (let i = 0; i < 120; i++) { // up to 10 minutes
+    const hasLoginRedirect = page.url().includes('freecash.com/en') || page.url().includes('freecash.com/');
+    const hasCashout = await page.evaluate(() => document.body.innerText.includes('Cashout')).catch(() => false);
+    const hasUserMenu = await page.evaluate(() => !!document.querySelector('[class*="avatar"], [class*="user"], [href*="cashout"]')).catch(() => false);
+    if (hasCashout || hasUserMenu) {
+      loggedIn = true;
+      break;
+    }
+    if (i % 6 === 0) log(`Waiting for login... (${Math.round(i * 5 / 60)}min)`);
+    await sleep(5000);
   }
+
+  if (!loggedIn) {
+    log('Login timeout (10min). Restart bot and log in faster.');
+    log('Exiting...');
+    await browser.close();
+    process.exit(1);
+  }
+
+  await page.evaluate(() => { document.title = '✅ SURVEY BOT - RUNNING ✅'; });
+  log('✅ Login detected! Bot starting in 3s...');
+  await sleep(3000);
 
   let fails = 0;
 
