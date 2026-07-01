@@ -10,162 +10,303 @@ const PROFILE_DIR = path.join(__dirname, 'profile');
 const LOG_FILE = path.join(__dirname, 'bot.log');
 const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
 const CAPTCHA_FLAG = path.join(__dirname, 'captcha.txt');
-const SURVEY_CHECK_INTERVAL = 30000;
+const STATE_FILE = path.join(__dirname, 'session.json');
 
 fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
 
-function log(msg) {
-  const line = `[${new Date().toISOString()}] ${msg}`;
-  console.log(line);
-  fs.appendFileSync(LOG_FILE, line + '\n');
+function log(msg) { const line = `[${new Date().toISOString()}] ${msg}`; console.log(line); fs.appendFileSync(LOG_FILE, line + '\n'); }
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+let sessionState = { answers: {}, surveyCount: 0, startTime: Date.now(), disqualified: 0, completed: 0 };
+try { if (fs.existsSync(STATE_FILE)) sessionState = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); } catch (e) {}
+
+function saveState() { fs.writeFileSync(STATE_FILE, JSON.stringify(sessionState, null, 2)); }
+
+const answerBank = {
+  yesno: ['Yes', 'No', 'Sometimes', 'Usually', 'Never', 'Rarely', 'Definitely', 'Probably not'],
+  frequency: ['Daily', 'Weekly', 'Monthly', 'Several times a week', 'Several times a month', 'Once in a while', 'Never'],
+  satisfaction: ['Very satisfied', 'Satisfied', 'Neutral', 'Dissatisfied', 'Very dissatisfied'],
+  agreement: ['Strongly agree', 'Agree', 'Neutral', 'Disagree', 'Strongly disagree'],
+  likelihood: ['Extremely likely', 'Very likely', 'Somewhat likely', 'Not very likely', 'Not at all likely'],
+  quality: ['Excellent', 'Good', 'Average', 'Fair', 'Poor'],
+  age: ['18-24', '25-34', '35-44', '45-54', '55+'],
+  gender: ['Male', 'Female', 'Prefer not to say'],
+  income: ['Under $25,000', '$25,000 - $49,999', '$50,000 - $74,999', '$75,000 - $99,999', '$100,000+'],
+  education: ['High school', 'Some college', 'Bachelor\'s degree', 'Master\'s degree', 'PhD/Doctorate'],
+  employment: ['Employed full-time', 'Employed part-time', 'Self-employed', 'Student', 'Unemployed', 'Retired'],
+  region: ['North America', 'Europe', 'Asia', 'South America', 'Africa', 'Australia'],
+  household: ['1', '2', '3', '4', '5+'],
+  children: ['Yes', 'No'],
+  browsing: ['Desktop/Laptop', 'Mobile phone', 'Tablet', 'All of the above'],
+  social: ['Facebook', 'Instagram', 'Twitter/X', 'TikTok', 'YouTube', 'LinkedIn', 'Reddit', 'Snapchat', 'None of the above'],
+  streaming: ['Netflix', 'Amazon Prime', 'Hulu', 'Disney+', 'HBO Max', 'Apple TV+', 'None'],
+  shopping: ['Amazon', 'Walmart', 'Target', 'eBay', 'Etsy', 'Best Buy', 'Other'],
+  health: ['Excellent', 'Good', 'Fair', 'Poor'],
+  exercise: ['Daily', 'Several times a week', 'Once a week', 'Rarely', 'Never'],
+};
+
+function getAnswer(category) {
+  if (!sessionState.answers[category]) {
+    sessionState.answers[category] = {};
+  }
+  const answers = answerBank[category];
+  if (!answers) return 'Yes';
+  const used = Object.keys(sessionState.answers[category]);
+  const available = answers.filter(a => !used.includes(a));
+  if (available.length === 0) {
+    sessionState.answers[category] = {};
+    return answers[Math.floor(Math.random() * answers.length)];
+  }
+  const pick = available[Math.floor(Math.random() * available.length)];
+  sessionState.answers[category][pick] = true;
+  saveState();
+  return pick;
 }
 
-function randomItem(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
-
-const textAnswers = [
-  "Yes", "No", "Sometimes", "Usually", "Never", "Often",
-  "I agree", "I disagree", "Neutral", "Good", "Fair", "Poor",
-  "Excellent", "Satisfied", "Dissatisfied", "Very satisfied",
-  "Daily", "Weekly", "Monthly", "Rarely",
-  "Under 18", "18-24", "25-34", "35-44", "45-54", "55+",
-  "Male", "Female", "Prefer not to say",
-  "High school", "College", "Bachelor's", "Master's", "PhD",
-  "$0-25k", "$25k-50k", "$50k-75k", "$75k-100k", "$100k+",
-  "Employed full-time", "Employed part-time", "Self-employed", "Student", "Unemployed",
-  "Single", "Married", "Divorced", "Widowed",
-  "Yes, I have children", "No, I don't have children",
-  "Rent", "Own", "Live with family",
-  "City", "Suburbs", "Rural",
-  "Android", "iOS", "Both", "Neither",
-  "Netflix", "Amazon Prime", "Hulu", "Disney+", "HBO Max", "None",
-  "Morning", "Afternoon", "Evening", "Night",
-];
-
-async function sleep(ms) {
-  return new Promise(r => setTimeout(r, ms));
+function classifyQuestion(text) {
+  const t = text.toLowerCase();
+  if (/\b(yes|no|do you|are you|have you|is it|does it|would you|will you)\b/.test(t)) return 'yesno';
+  if (/\b(frequency|how often|times per|times a |per day|per week|per month)\b/.test(t)) return 'frequency';
+  if (/\b(satisf(y|ied)|satisfaction|how satisfied)\b/.test(t)) return 'satisfaction';
+  if (/\b(agree|agree|strongly|disagree|to what extent)\b/.test(t)) return 'agreement';
+  if (/\b(likely|likelihood|how likely|probability)\b/.test(t)) return 'likelihood';
+  if (/\b(quality|how would you rate|excellent|poor|rate the)\b/.test(t)) return 'quality';
+  if (/\b(age|how old|age group|year old)\b/.test(t)) return 'age';
+  if (/\b(gender|sex|male|female)\b/.test(t)) return 'gender';
+  if (/\b(income|salary|earn|make per year)\b/.test(t)) return 'income';
+  if (/\b(education|degree|college|university|high school)\b/.test(t)) return 'education';
+  if (/\b(employ|job|work|occupation|career|student|retired)\b/.test(t)) return 'employment';
+  if (/\b(region|country|live|located|area|state)\b/.test(t)) return 'region';
+  if (/\b(household|people living|family size|how many people)\b/.test(t)) return 'household';
+  if (/\b(children|kids|child|parent)\b/.test(t)) return 'children';
+  if (/\b(brows(e|er)|device|computer|phone|mobile|desktop)\b/.test(t)) return 'browsing';
+  if (/\b(social media|facebook|instagram|twitter|tiktok)\b/.test(t)) return 'social';
+  if (/\b(stream|netflix|hulu|disney|hbo|watch)\b/.test(t)) return 'streaming';
+  if (/\b(shopping|buy|purchase|store|amazon|walmart)\b/.test(t)) return 'shopping';
+  if (/\b(health|medical|condition|wellness|sick)\b/.test(t)) return 'health';
+  if (/\b(exercise|workout|gym|physical|active|sport)\b/.test(t)) return 'exercise';
+  return null;
 }
 
-async function detectCaptcha(page) {
-  const selectors = [
+function getSmartText(fieldText) {
+  const known = {
+    email: () => `user${Math.floor(Math.random() * 99999)}@email.com`,
+    phone: () => '555-' + String(Math.floor(Math.random() * 900) + 100).padStart(3, '0') + '-' + String(Math.floor(Math.random() * 9000) + 1000).padStart(4, '0'),
+    zip: () => String(Math.floor(Math.random() * 90000) + 10000),
+    postal: () => String(Math.floor(Math.random() * 90000) + 10000),
+    code: () => String(Math.floor(Math.random() * 90000) + 10000),
+    name: () => ['Alex', 'Jordan', 'Morgan', 'Casey', 'Riley', 'Taylor', 'Sam', 'Jamie'][Math.floor(Math.random() * 8)],
+    first: () => ['Alex', 'Jordan', 'Morgan', 'Casey', 'Riley', 'Taylor', 'Sam', 'Jamie'][Math.floor(Math.random() * 8)],
+    last: () => ['Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Garcia', 'Miller', 'Davis'][Math.floor(Math.random() * 8)],
+    city: () => ['New York', 'Los Angeles', 'Chicago', 'Houston', 'Phoenix', 'Philadelphia', 'San Antonio', 'San Diego'][Math.floor(Math.random() * 8)],
+    state: () => ['California', 'Texas', 'Florida', 'New York', 'Illinois', 'Pennsylvania', 'Ohio', 'Georgia'][Math.floor(Math.random() * 8)],
+    occupation: () => ['Software Engineer', 'Teacher', 'Nurse', 'Manager', 'Sales Representative', 'Analyst', 'Consultant', 'Administrator'][Math.floor(Math.random() * 8)],
+    company: () => ['Tech Corp', 'Global Solutions', 'Innovation Inc', 'Premier Services', 'Atlas Group', 'Summit Industries'][Math.floor(Math.random() * 6)],
+  };
+  for (const [key, fn] of Object.entries(known)) {
+    if (fieldText.includes(key)) return fn();
+  }
+  const categories = Object.keys(answerBank);
+  const cat = categories[Math.floor(Math.random() * categories.length)];
+  return getAnswer(cat);
+}
+
+async function captchaGuard(page) {
+  const captchaSelectors = [
     'iframe[src*="recaptcha"]', 'iframe[src*="turnstile"]', 'iframe[src*="hcaptcha"]',
     '.g-recaptcha', '.cf-turnstile', '.h-captcha',
     '#captcha', '[class*="captcha"]', '[id*="captcha"]',
     'iframe[src*="challenges.cloudflare.com"]',
     '[aria-label*="captcha"]',
+    'div[style*="visibility: visible"][style*="position: absolute"]',
   ];
-  for (const sel of selectors) {
-    if (await page.$(sel)) return true;
-  }
-  return false;
-}
-
-async function waitForCaptchaSolved(page, timeout = 120000) {
-  const start = Date.now();
-  while (Date.now() - start < timeout) {
-    if (!(await detectCaptcha(page))) {
-      log('Captcha solved');
-      return true;
-    }
-    await sleep(1000);
-  }
-  log('Captcha wait timeout');
-  return false;
-}
-
-async function handleCaptcha(page) {
-  log('*** CAPTCHA DETECTED ***');
-  const shot = path.join(SCREENSHOT_DIR, `captcha-${Date.now()}.png`);
-  await page.screenshot({ path: shot, fullPage: false });
-  for (let i = 0; i < 5; i++) { try { process.stdout.write('\x07'); } catch (e) {} }
-  fs.writeFileSync(CAPTCHA_FLAG, `Solve captcha! Screenshot: ${shot}\n`);
-  log(`Screenshot: ${shot}`);
-  log('Solve captcha in the browser window...');
-  const solved = await waitForCaptchaSolved(page);
-  try { fs.unlinkSync(CAPTCHA_FLAG); } catch (e) {}
-  return solved;
-}
-
-async function answerPage(page) {
-  let answered = 0;
-  const frames = [page, ...page.frames()];
-  for (const frame of frames) {
-    try {
-      const context = await frame.executionContext();
-      await context.evaluate(() => {
-        document.querySelectorAll('input[type="radio"]').forEach((r, i, all) => {
-          if (!r.checked && Math.random() > 0.3) r.click();
-        });
-        document.querySelectorAll('input[type="checkbox"]').forEach((c, i) => {
-          if (i < 3 && Math.random() > 0.5 && !c.checked) c.click();
-        });
-        document.querySelectorAll('select').forEach(s => {
-          const opts = s.querySelectorAll('option:not([value=""])');
-          if (opts.length) s.selectedIndex = Math.floor(Math.random() * opts.length) + 1;
-        });
-        document.querySelectorAll('input[type="text"], input:not([type]), textarea').forEach(t => {
-          if (!t.value && t.offsetParent !== null) {
-            const p = (t.placeholder || '').toLowerCase();
-            if (p.includes('email')) t.value = 'user' + Date.now() + '@example.com';
-            else if (p.includes('phone') || p.includes('number')) t.value = '555-0100';
-            else if (p.includes('zip') || p.includes('postal')) t.value = '10001';
-            else if (p.includes('age') || p.includes('year')) t.value = '30';
-            else if (p.includes('first') || p.includes('last') || p.includes('name')) t.value = 'John';
-            else t.value = ['Good','Fine','Yes','No','Sometimes','Daily','Weekly','Never'][Math.floor(Math.random()*7)];
-            t.dispatchEvent(new Event('input', { bubbles: true }));
-            t.dispatchEvent(new Event('change', { bubbles: true }));
-          }
-        });
-      });
-      answered++;
-      const btns = await frame.$$('button, input[type="submit"], a[role="button"]');
-      for (const btn of btns) {
-        const text = (await btn.evaluate(el => el.textContent.trim().toLowerCase())) || '';
-        if (['next','submit','continue','send','done','ok','finish','complete','yes, continue'].some(k => text.includes(k))) {
-          try { await btn.click(); answered++; } catch (e) {}
-          break;
+  for (const sel of captchaSelectors) {
+    if (await page.$(sel).catch(() => null)) {
+      log('*** CAPTCHA DETECTED ***');
+      const shot = path.join(SCREENSHOT_DIR, `captcha-${Date.now()}.png`);
+      await page.screenshot({ path: shot, fullPage: false }).catch(() => {});
+      for (let i = 0; i < 5; i++) { try { process.stdout.write('\x07'); } catch (e) {} }
+      fs.writeFileSync(CAPTCHA_FLAG, `CAPTCHA at ${new Date().toISOString()}\nSolve in browser! Screenshot: ${shot}\n`);
+      log(`Screenshot: ${shot}`);
+      const start = Date.now();
+      while (Date.now() - start < 180000) {
+        if (!(await page.$(sel).catch(() => false))) {
+          log('Captcha solved!');
+          fs.unlinkSync(CAPTCHA_FLAG);
+          return true;
         }
+        await sleep(1000);
       }
-    } catch (e) {}
+      log('Captcha timeout');
+      return false;
+    }
   }
-  return answered > 0;
+  return true;
 }
 
-async function waitForSurveyEnd(page, timeout = 180000) {
-  const start = Date.now();
-  while (Date.now() - start < timeout) {
-    const url = page.url().toLowerCase();
-    if (url.includes('thank') || url.includes('complete') || url.includes('done') || url.includes('finished') || url.includes('success')) {
-      log('Survey completion page detected');
-      await sleep(2000);
-      return true;
-    }
-    if (await detectCaptcha(page)) {
-      await handleCaptcha(page);
-    }
-    await answerPage(page);
+async function surveyBrain(framePage, depth = 0) {
+  if (depth > 3) return false;
+  if (!(await captchaGuard(framePage))) return false;
+
+  const url = framePage.url().toLowerCase();
+  if (url.includes('thank') || url.includes('complete') || url.includes('finished') || url.includes('success') || url.includes('congratulations')) {
+    log('Completion page detected');
     await sleep(2000);
+    sessionState.completed++;
+    saveState();
+    return true;
   }
-  log('Survey wait timeout - closing');
-  return false;
+  if (url.includes('disqualif') || url.includes('screen') || url.includes('unfortunately') || url.includes('not a match') || url.includes('quotafull')) {
+    log('Disqualified from survey');
+    sessionState.disqualified++;
+    saveState();
+    return true;
+  }
+
+  let interacted = false;
+  const frames = [framePage, ...framePage.frames()];
+
+  for (const f of frames) {
+    try {
+      const answered = await f.evaluate(() => {
+        let count = 0;
+        const used = new Set();
+
+        document.querySelectorAll('input[type="radio"]').forEach(r => {
+          const name = r.name || r.id || '';
+          if (!name || used.has(name)) return;
+          const group = document.querySelectorAll(`input[type="radio"][name="${r.name}"]`);
+          const midIdx = Math.floor(group.length / 2);
+          const pick = group[Math.min(midIdx + Math.floor(Math.random() * 2 - 1), group.length - 1)];
+          if (!pick.checked) { pick.click(); count++; }
+          used.add(name);
+        });
+
+        document.querySelectorAll('input[type="checkbox"]').forEach((c, i) => {
+          if (i < 3 && Math.random() > 0.4 && !c.checked) { c.click(); count++; }
+        });
+
+        document.querySelectorAll('select').forEach(s => {
+          const opts = [...s.querySelectorAll('option')].filter(o => o.value && o.value !== s.value);
+          const mid = Math.floor(opts.length / 2);
+          const pick = opts[Math.min(mid + Math.floor(Math.random() * 2 - 1), opts.length - 1)];
+          if (pick) { s.value = pick.value; s.dispatchEvent(new Event('change', { bubbles: true })); count++; }
+        });
+
+        document.querySelectorAll('input[type="text"], input:not([type]), input[type="number"], textarea').forEach(t => {
+          if (t.value || t.offsetParent === null) return;
+          const p = (t.placeholder || '').toLowerCase();
+          const id = (t.id || '').toLowerCase();
+          const label = (document.querySelector(`label[for="${t.id}"]`) || {}).textContent || '';
+          const ctx = p + ' ' + id + ' ' + label.toLowerCase();
+
+          if (ctx.includes('email')) t.value = `user${Date.now()}@email.com`;
+          else if (ctx.includes('phone')) t.value = '555-0100';
+          else if (ctx.includes('zip') || ctx.includes('postal')) t.value = '10001';
+          else if (ctx.includes('name') || ctx.includes('first') || ctx.includes('last')) t.value = ['Alex','Jordan','Morgan','Taylor'][Math.floor(Math.random()*4)];
+          else if (ctx.includes('code')) t.value = String(Math.floor(Math.random() * 99999));
+          else t.value = ['Good','Fine','Yes','No','Sometimes','Daily','Weekly','Never','3-4 times','Once or twice','Several'][Math.floor(Math.random()*11)];
+
+          t.dispatchEvent(new Event('input', { bubbles: true }));
+          t.dispatchEvent(new Event('change', { bubbles: true }));
+          count++;
+        });
+
+        const btns = [...document.querySelectorAll('button, input[type="submit"], input[type="image"], a[role="button"], .btn, [class*="button"]')];
+        for (const btn of btns) {
+          const txt = (btn.textContent || btn.value || '').trim().toLowerCase();
+          if (['next','submit','continue','send','done','ok','finish','complete','yes','confirm','forward','proceed','>>','>','start survey','begin survey','i agree'].some(k => txt.includes(k))) {
+            if (btn.offsetParent !== null) { btn.click(); count++; break; }
+          }
+        }
+        return count;
+      });
+      if (answered > 0) interacted = true;
+    } catch (e) {
+      if (depth < 2 && f !== framePage) {
+        try {
+          const innerAnswered = await surveyBrain(f, depth + 1);
+          if (innerAnswered) interacted = true;
+        } catch (innerE) {}
+      }
+    }
+  }
+  return interacted;
+}
+
+async function handleSurveyPopup(popup) {
+  try {
+    await popup.waitForSelector('body', { timeout: 20000 });
+  } catch (e) {
+    log('Popup had no body, closing');
+    try { popup.close(); } catch(e2) {}
+    return;
+  }
+
+  log('Survey popup detected, running brain...');
+  const url = popup.url().toLowerCase();
+  log(`Survey URL: ${url.slice(0, 200)}`);
+
+  const start = Date.now();
+  let lastActivity = Date.now();
+  let idleLoops = 0;
+
+  while (Date.now() - start < 300000) {
+    if (Date.now() - lastActivity > 30000) idleLoops++;
+    else idleLoops = 0;
+
+    if (idleLoops > 3) {
+      log('No activity for 90s, closing survey');
+      break;
+    }
+
+    const currentUrl = popup.url().toLowerCase();
+    if (currentUrl.includes('thank') || currentUrl.includes('complete') || currentUrl.includes('congratulations')) {
+      log('Survey completed!');
+      sessionState.completed++;
+      saveState();
+      await sleep(3000);
+      break;
+    }
+    if (currentUrl.includes('disqualif') || currentUrl.includes('quotafull') || currentUrl.includes('not a match')) {
+      log('Screen-out / disqualified');
+      sessionState.disqualified++;
+      saveState();
+      await sleep(2000);
+      break;
+    }
+
+    try {
+      const acted = await surveyBrain(popup);
+      if (acted) {
+        lastActivity = Date.now();
+        await captchaGuard(popup);
+      }
+    } catch (e) {
+      log(`Popup loop error: ${e.message.slice(0, 100)}`);
+    }
+
+    if (popup.isClosed()) break;
+    await sleep(1500 + Math.random() * 2000);
+  }
+
+  try { if (!popup.isClosed()) await popup.close(); } catch (e) {}
+  log('Survey popup closed');
 }
 
 let browser;
 
 async function main() {
-  log('=== Survey Bot v2 ===');
-  log('Browser will open for you to log in and solve captchas.');
-  log('The bot handles everything else automatically.\n');
+  log('=== Survey Bot v3 (Intelligent) ===');
+  log(`Session: ${sessionState.completed} completed, ${sessionState.disqualified} disqualified, ${sessionState.surveyCount} started`);
 
   browser = await puppeteer.launch({
     headless: false,
     executablePath: CHROME_PATH,
     defaultViewport: { width: 1280, height: 900 },
     userDataDir: PROFILE_DIR,
-    args: [
-      '--no-sandbox', '--disable-setuid-sandbox',
-      '--disable-blink-features=AutomationControlled',
-      '--window-size=1280,900',
-    ],
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-blink-features=AutomationControlled', '--window-size=1280,900'],
   });
 
   const page = await browser.newPage();
@@ -173,100 +314,118 @@ async function main() {
     Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
   });
 
+  const activePopups = new Set();
+
   page.on('popup', async (popup) => {
-    log('Popup detected - survey window opened');
-    await popup.waitForSelector('body', { timeout: 10000 }).catch(() => {});
-    log('Survey popup loaded, answering questions...');
-    await waitForSurveyEnd(popup);
-    try { await popup.close(); } catch (e) {}
-    log('Survey popup closed, returning to main page');
-    await page.bringToFront();
+    if (activePopups.size >= 2) {
+      try { popup.close(); } catch(e) {}
+      return;
+    }
+    activePopups.add(popup);
+    await handleSurveyPopup(popup);
+    activePopups.delete(popup);
+    try { await page.bringToFront(); } catch(e) {}
   });
 
   await page.goto('https://freecash.com/en', { waitUntil: 'domcontentloaded', timeout: 30000 });
-  await sleep(3000);
+  await sleep(5000);
 
-  const isLoggedIn = await page.evaluate(() => {
-    return document.body.innerText.includes('Cashout') || !!document.querySelector('[href*="cashout"]');
-  });
+  const isLoggedIn = await page.evaluate(() =>
+    document.body.innerText.includes('Cashout') || !!document.querySelector('[href*="cashout"]')
+  );
 
   if (!isLoggedIn) {
-    log('Please log in to Freecash.com in the browser.');
-    log('Waiting up to 5 minutes for login...');
+    log('Waiting for login...');
     for (let i = 0; i < 60; i++) {
       await sleep(5000);
-      const ok = await page.evaluate(() => {
-        return document.body.innerText.includes('Cashout') || !!document.querySelector('[href*="cashout"]');
-      });
-      if (ok) { log('Login detected!'); break; }
+      const ok = await page.evaluate(() =>
+        document.body.innerText.includes('Cashout') || !!document.querySelector('[href*="cashout"]')
+      );
+      if (ok) { log('Logged in!'); break; }
     }
-  } else {
-    log('Already logged in.');
   }
 
-  log('\nBot running. Scans for surveys every 30s.');
-  log('When captcha appears, solve it in the browser window.\n');
+  log('\n=== Survey Bot running ===');
+  log(`Completed this session: ${sessionState.completed}`);
+  log(`Disqualified: ${sessionState.disqualified}`);
+  log(`Watch the browser window. Solve captchas when prompted.\n`);
 
-  let surveyCount = 0;
-  const seenOffers = new Set();
+  let fails = 0;
 
   while (true) {
     try {
+      if (activePopups.size > 0) {
+        await sleep(15000);
+        continue;
+      }
+
       await page.goto('https://freecash.com/en', { waitUntil: 'domcontentloaded', timeout: 20000 });
-      await sleep(3000);
+      await sleep(5000);
 
-      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-      await sleep(2000);
+      for (let scroll = 0; scroll < 5; scroll++) {
+        await page.evaluate(() => window.scrollBy(0, 400));
+        await sleep(800 + Math.random() * 500);
+      }
 
-      const offers = await page.evaluate(() => {
+      const offerTexts = await page.evaluate(() => {
         const items = [];
-        document.querySelectorAll('a, button, [role="button"], .offer, .task, [class*="offer"], [class*="card"]').forEach(el => {
-          const text = (el.textContent || '').trim().toLowerCase();
+        document.querySelectorAll('a, button, [role="button"], [class*="offer"], [class*="card"], [class*="item"], [class*="tile"]').forEach(el => {
+          const text = (el.textContent || '').trim();
           const href = el.href || '';
-          if (text.includes('survey') || text.includes('start') || text.includes('play') || text.includes('earn')) {
-            items.push({ text: text.slice(0, 80), href });
+          if (text && text.length > 5 && !items.find(i => i.text === text)) {
+            items.push({ text: text.slice(0, 120), href, rect: el.getBoundingClientRect() });
           }
         });
-        return items;
+        return items.filter(i => i.rect && i.rect.top < window.innerHeight && i.rect.bottom > 0);
       });
 
-      if (offers.length > 0) {
-        log(`Found ${offers.length} potential offers`);
-        for (const o of offers.slice(0, 3)) {
-          const key = o.text + o.href;
-          if (seenOffers.has(key)) continue;
-          seenOffers.add(key);
-          log(`Clicking: "${o.text}"`);
-          const links = await page.$$('a');
-          for (const link of links) {
-            const t = (await link.evaluate(el => el.textContent.trim().toLowerCase())) || '';
-            if (o.text.includes(t) && (t.includes('survey') || t.includes('start'))) {
-              try {
-                await link.click();
-                await sleep(5000);
-                surveyCount++;
-                log(`Survey #${surveyCount} started`);
-                break;
-              } catch (e) { log(`Click error: ${e.message}`); }
-            }
-          }
+      const clicks = offerTexts.filter(o => {
+        const t = o.text.toLowerCase();
+        const worthScore = (t.match(/\$\d+/g) || []).reduce((sum, n) => sum + parseFloat(n.replace('$','')), 0);
+        return worthScore > 0 || t.includes('survey') || t.includes('start') || t.includes('play now') || t.includes('get paid');
+      }).sort((a, b) => {
+        const aVal = (a.text.match(/\$\d+/g) || []).reduce((s, n) => s + parseFloat(n.replace('$','')), 0);
+        const bVal = (b.text.match(/\$\d+/g) || []).reduce((s, n) => s + parseFloat(n.replace('$','')), 0);
+        return bVal - aVal;
+      });
+
+      if (clicks.length > 0) {
+        const target = clicks[Math.floor(Math.random() * Math.min(clicks.length, 3))];
+        log(`Clicking offer: "${target.text.slice(0, 80)}"`);
+        fails = 0;
+
+        const clickable = await page.$(`a[href="${target.href}"]`);
+        if (clickable) {
+          await clickable.click().catch(() => {});
+          await sleep(5000 + Math.random() * 3000);
+          sessionState.surveyCount++;
+          saveState();
         }
       } else {
-        log(`No offers found (${new Date().toLocaleTimeString()})`);
+        fails++;
+        log(`No visible offers found (attempt ${fails})`);
+        if (fails >= 5) {
+          log('5 failed scans. Refreshing page...');
+          await page.reload({ waitUntil: 'domcontentloaded' });
+          await sleep(5000);
+          fails = 0;
+        }
       }
 
-      if (await detectCaptcha(page)) {
-        await handleCaptcha(page);
-      }
+      await captchaGuard(page);
+      log(`Status: ${sessionState.completed} done, ${sessionState.disqualified} dq, ${fails} failed scans`);
     } catch (e) {
-      log(`Loop error: ${e.message}`);
+      log(`Main error: ${e.message.slice(0, 150)}`);
+      fails++;
     }
-    await sleep(SURVEY_CHECK_INTERVAL);
+
+    await sleep(25000 + Math.random() * 10000);
   }
 }
 
 process.on('SIGINT', async () => {
   log('Shutting down...');
+  saveState();
   if (browser) await browser.close();
   process.exit(0);
 });
@@ -274,6 +433,7 @@ process.on('SIGINT', async () => {
 main().catch(async (e) => {
   log(`Fatal: ${e.message}`);
   console.error(e);
+  saveState();
   if (browser) await browser.close();
   process.exit(1);
 });
